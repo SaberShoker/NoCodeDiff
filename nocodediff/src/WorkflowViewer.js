@@ -1800,6 +1800,8 @@ function WorkflowViewer() {
   const CompareView = () => {
     if (!compareData) return null;
 
+    const [showDetailedAnalysis, setShowDetailedAnalysis] = useState(false);
+
     // 🔧 Детальное сравнение по блокам
     const compareBlocks = (oldJson, newJson) => {
       const changes = {
@@ -2007,8 +2009,6 @@ function WorkflowViewer() {
     const differences = findDifferences(compareData.old, compareData.new);
     const blockComparison = compareBlocks(compareData.old, compareData.new);
     const schemeSettingsComparison = compareSchemeSettings(compareData.old, compareData.new);
-    
-    const [showDetailedAnalysis, setShowDetailedAnalysis] = useState(false);
 
     return (
       <div style={{
