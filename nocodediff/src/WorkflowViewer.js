@@ -17,6 +17,9 @@ function WorkflowViewer() {
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [isInitialLoad, setIsInitialLoad] = useState(true);
 
+  // 🔧 Настройки сетки привязки
+  const SNAP_GRID_SIZE = 10; // Размер ячейки сетки (чем меньше, тем точнее)
+
   const handleFileUpload = (event) => {
     const file = event.target.files[0];
     if (!file) return;
@@ -52,6 +55,11 @@ function WorkflowViewer() {
     setIsInitialLoad(true);
   };
 
+  // 🔧 Функция округления координат до сетки
+  const snapToGrid = useCallback((value) => {
+    return Math.round(value / SNAP_GRID_SIZE) * SNAP_GRID_SIZE;
+  }, []);
+
   const parseWorkflowData = useCallback((json) => {
     if (!json?.Scheme?.RouteScheme?.Layout) {
       return;
@@ -72,8 +80,8 @@ function WorkflowViewer() {
       return {
         id: blockId,
         position: { 
-          x: blockLayout.Bounds.X, 
-          y: blockLayout.Bounds.Y 
+          x: snapToGrid(blockLayout.Bounds.X), // 🔧 Округляем начальные координаты
+          y: snapToGrid(blockLayout.Bounds.Y)
         },
         data: { 
           label: fullBlock?.Title || blockId,
@@ -105,7 +113,7 @@ function WorkflowViewer() {
 
     setNodes(parsedNodes);
     setEdges(parsedEdges);
-  }, [setNodes, setEdges]);
+  }, [setNodes, setEdges, snapToGrid]);
 
   // После загрузки данных — применяем fitView только один раз
   useEffect(() => {
@@ -117,11 +125,29 @@ function WorkflowViewer() {
     }
   }, [nodes.length, isInitialLoad]);
 
-  // Обработчик окончания перетаскивания
+  // 🔧 Обработчик окончания перетаскивания с точной привязкой
   const onNodeDragStop = useCallback((event, node) => {
-    console.log(`Блок ${node.id} перемещён в позицию:`, node.position);
-    // Здесь можно добавить сохранение новых координат
-  }, []);
+    const snappedPosition = {
+      x: snapToGrid(node.position.x),
+      y: snapToGrid(node.position.y)
+    };
+
+    console.log(`Блок ${node.id} перемещён:`, {
+      от: node.position,
+      до: snappedPosition
+    });
+
+    // 🔧 Принудительно устанавливаем позицию по сетке
+    setNodes(nds => nds.map(n => {
+      if (n.id === node.id) {
+        return {
+          ...n,
+          position: snappedPosition
+        };
+      }
+      return n;
+    }));
+  }, [setNodes, snapToGrid]);
 
   // Обработчик клика на узел — только выделение, без сдвига
   const onNodeClick = useCallback((event, node) => {
@@ -393,6 +419,25 @@ function WorkflowViewer() {
         )}
       </div>
 
+      {/* 🔧 Панель настроек сетки */}
+      <div style={{
+        position: 'absolute',
+        top: '15px',
+        left: '50%',
+        transform: 'translateX(-50%)',
+        zIndex: 1000,
+        backgroundColor: 'rgba(255,255,255,0.95)',
+        padding: '8px 16px',
+        borderRadius: '8px',
+        border: '1px solid #ddd',
+        boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+        fontSize: '13px',
+        fontWeight: '500',
+        pointerEvents: 'none'
+      }}>
+        📐 Шаг сетки: <strong style={{ color: '#007bff' }}>{SNAP_GRID_SIZE}px</strong>
+      </div>
+
       {/* Кнопка сброса */}
       <button 
         onClick={handleReset}
@@ -410,7 +455,8 @@ function WorkflowViewer() {
           fontSize: '14px',
           fontWeight: '500',
           boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
-          transition: 'background-color 0.2s'
+          transition: 'background-color 0.2s',
+          pointerEvents: 'auto'
         }}
         onMouseOver={(e) => e.target.style.backgroundColor = '#c82333'}
         onMouseOut={(e) => e.target.style.backgroundColor = '#dc3545'}
@@ -451,9 +497,12 @@ function WorkflowViewer() {
             }
           </div>
           <div style={{ marginBottom: '4px', color: '#666' }}>
-            <strong>Позиция:</strong> {
+            <strong>Позиция (X, Y):</strong> {
               Math.round(nodes.find(n => n.id === selectedNodeId)?.position?.x) || 0}, {
               Math.round(nodes.find(n => n.id === selectedNodeId)?.position?.y) || 0}
+          </div>
+          <div style={{ marginBottom: '4px', color: '#28a745', fontSize: '11px' }}>
+            ✅ Привязка к сетке: {SNAP_GRID_SIZE}px
           </div>
           <div style={{ color: '#666', fontSize: '11px', marginTop: '8px' }}>
             💡 Перетащите блок для изменения позиции • Клик для выбора
@@ -522,7 +571,7 @@ function WorkflowViewer() {
         autoPanOnNodeDrag={false}
         autoPanOnConnect={false}
         snapToGrid={true}
-        snapGrid={[15, 15]}
+        snapGrid={[SNAP_GRID_SIZE, SNAP_GRID_SIZE]} // 🔧 Точная привязка к сетке
         zoomOnScroll={true}
         panOnScroll={true}
         panOnDrag={true}
@@ -543,7 +592,11 @@ function WorkflowViewer() {
         }}
       >
         <Controls showInteractive={false} />
-        <Background color="#aaa" gap={16} />
+        <Background 
+          color="#ccc" 
+          gap={SNAP_GRID_SIZE} // 🔧 Визуальная сетка совпадает с привязкой
+          size={1}
+        />
         <MiniMap 
           nodeStrokeColor={(n) => {
             if (n.id === selectedNodeId) return '#007bff';
@@ -616,6 +669,11 @@ function WorkflowViewer() {
         .react-flow__edge-label {
           user-select: none;
           -webkit-user-select: none;
+        }
+        
+        /* 🔧 Усиливаем видимость сетки */
+        .react-flow__background-pattern {
+          opacity: 0.6;
         }
       `}</style>
     </div>
