@@ -10,7 +10,7 @@
           "$type": "Sungero.NoCode.Expression.ConditionExpression, Sungero.NoCode.Expression",
           "LeftExpression": {
             "$type": "Sungero.NoCode.Expression.SimpleExpression, Sungero.NoCode.Expression",
-            "Description": "Задача → Обращение → Услуга",
+            "Description": "Задача → Обращение → Услуги",
             "Tokens": {
               "$type": "System.Collections.ObjectModel.Collection`1[[Sungero.NoCode.Expression.Tokens.BaseToken, Sungero.NoCode.Expression]], System.Private.CoreLib",
               "$values": [
