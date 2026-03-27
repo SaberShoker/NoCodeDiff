@@ -306,39 +306,21 @@ function WorkflowArea({
 
       const fileData = await response.json();
       
-      // Проверяем наличие content в ответе
-      if (!fileData.content) {
-        // Если контента нет, пробуем загрузить напрямую по download_url из ответа
-        if (fileData.download_url) {
-          const contentResponse = await fetch(fileData.download_url);
-          if (!contentResponse.ok) {
-            throw new Error(`Не удалось получить содержимое файла: ${response.status}`);
-          }
-          const content = await contentResponse.text();
-          
-          if (!content || content.trim() === '') {
-            throw new Error('Пустое содержимое файла');
-          }
-          
-          let json;
-          try {
-            json = JSON.parse(content);
-          } catch (parseErr) {
-            throw new Error('Ошибка парсинга JSON: ' + parseErr.message);
-          }
-
-          setCompareData(prev => ({
-            ...prev,
-            [versionType]: { commit, json }
-          }));
-          setIsLoadingGit(false);
-          return;
-        } else {
-          throw new Error('Файл не найден в указанном коммите');
-        }
-      }
+      let content;
       
-      const content = atob(fileData.content);
+      // Проверяем наличие content в ответе
+      if (fileData.content) {
+        content = atob(fileData.content);
+      } else if (fileData.download_url) {
+        // Если контента нет, пробуем загрузить напрямую по download_url
+        const contentResponse = await fetch(fileData.download_url);
+        if (!contentResponse.ok) {
+          throw new Error(`Не удалось получить содержимое файла: ${contentResponse.status}`);
+        }
+        content = await contentResponse.text();
+      } else {
+        throw new Error('Файл не найден в указанном коммите');
+      }
       
       if (!content || content.trim() === '') {
         throw new Error('Пустое содержимое файла');
@@ -351,16 +333,30 @@ function WorkflowArea({
         throw new Error('Ошибка парсинга JSON: ' + parseErr.message);
       }
 
-      setCompareData(prev => ({
-        ...prev,
-        [versionType]: { commit, json }
-      }));
+      setCompareData(prev => {
+        const newData = {
+          ...prev,
+          [versionType]: { commit, json }
+        };
+        // Если обе версии загружены, автоматически выполняем сравнение
+        if (newData.old && newData.new) {
+          setTimeout(() => {
+            onCompare({
+              old: newData.old.json,
+              new: newData.new.json,
+              oldCommit: newData.old.commit,
+              newCommit: newData.new.commit
+            });
+          }, 0);
+        }
+        return newData;
+      });
     } catch (err) {
       setError('Ошибка загрузки версии: ' + err.message);
     } finally {
       setIsLoadingGit(false);
     }
-  }, [gitConfig, selectedGitFile, setCompareData]);
+  }, [gitConfig, selectedGitFile, onCompare]);
 
   // 🔧 Выполнение сравнения двух версий
   const executeCompare = useCallback(() => {
