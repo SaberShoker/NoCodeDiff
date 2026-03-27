@@ -1800,6 +1800,168 @@ function WorkflowViewer() {
   const CompareView = () => {
     if (!compareData) return null;
 
+    // 🔧 Детальное сравнение по блокам
+    const compareBlocks = (oldJson, newJson) => {
+      const changes = {
+        added: [],
+        removed: [],
+        modified: []
+      };
+      
+      const oldBlocks = oldJson?.Scheme?.RouteScheme?.Blocks?.$values || [];
+      const newBlocks = newJson?.Scheme?.RouteScheme?.Blocks?.$values || [];
+      const oldLayout = oldJson?.Scheme?.RouteScheme?.Layout?.BlocksLayout?.$values || [];
+      const newLayout = newJson?.Scheme?.RouteScheme?.Layout?.BlocksLayout?.$values || [];
+      
+      // Создаем мапы для быстрого доступа
+      const oldBlocksMap = new Map(oldBlocks.map(b => [b.Id, b]));
+      const newBlocksMap = new Map(newBlocks.map(b => [b.Id, b]));
+      const oldLayoutMap = new Map(oldLayout.map(l => [l.BlockId, l]));
+      const newLayoutMap = new Map(newLayout.map(l => [l.BlockId, l]));
+      
+      // Проверяем удаленные и измененные блоки
+      oldBlocks.forEach(oldBlock => {
+        const newBlock = newBlocksMap.get(oldBlock.Id);
+        if (!newBlock) {
+          changes.removed.push({
+            blockId: oldBlock.Id,
+            title: oldBlock.Title,
+            type: oldBlock.$type
+          });
+        } else {
+          // Сравниваем свойства блока
+          const blockChanges = [];
+          
+          if (oldBlock.Title !== newBlock.Title) {
+            blockChanges.push({
+              property: 'Title',
+              oldValue: oldBlock.Title,
+              newValue: newBlock.Title
+            });
+          }
+          
+          if (oldBlock.$type !== newBlock.$type) {
+            blockChanges.push({
+              property: 'Type',
+              oldValue: oldBlock.$type,
+              newValue: newBlock.$type
+            });
+          }
+          
+          // Сравниваем координаты из Layout
+          const oldLayoutItem = oldLayoutMap.get(oldBlock.Id);
+          const newLayoutItem = newLayoutMap.get(oldBlock.Id);
+          
+          if (oldLayoutItem && newLayoutItem) {
+            if (oldLayoutItem.Bounds.X !== newLayoutItem.Bounds.X || 
+                oldLayoutItem.Bounds.Y !== newLayoutItem.Bounds.Y) {
+              blockChanges.push({
+                property: 'Coordinates',
+                oldValue: `(${oldLayoutItem.Bounds.X}, ${oldLayoutItem.Bounds.Y})`,
+                newValue: `(${newLayoutItem.Bounds.X}, ${newLayoutItem.Bounds.Y})`
+              });
+            }
+          }
+          
+          // Сравниваем выражения (expression)
+          const oldExpr = oldBlock.Expression;
+          const newExpr = newBlock.Expression;
+          
+          if (oldExpr || newExpr) {
+            const oldExprStr = oldExpr ? JSON.stringify(oldExpr) : '';
+            const newExprStr = newExpr ? JSON.stringify(newExpr) : '';
+            
+            if (oldExprStr !== newExprStr) {
+              blockChanges.push({
+                property: 'Expression',
+                oldValue: oldExpr?.Description || oldExprStr.substring(0, 100),
+                newValue: newExpr?.Description || newExprStr.substring(0, 100)
+              });
+            }
+          }
+          
+          // Сравниваем свойства блоков
+          const oldProps = oldBlock.Properties?.$values || [];
+          const newProps = newBlock.Properties?.$values || [];
+          
+          if (JSON.stringify(oldProps) !== JSON.stringify(newProps)) {
+            blockChanges.push({
+              property: 'Properties',
+              oldValue: oldProps.length > 0 ? `${oldProps.length} properties` : 'none',
+              newValue: newProps.length > 0 ? `${newProps.length} properties` : 'none'
+            });
+          }
+          
+          if (blockChanges.length > 0) {
+            changes.modified.push({
+              blockId: oldBlock.Id,
+              title: oldBlock.Title,
+              changes: blockChanges
+            });
+          }
+        }
+      });
+      
+      // Проверяем добавленные блоки
+      newBlocks.forEach(newBlock => {
+        if (!oldBlocksMap.has(newBlock.Id)) {
+          changes.added.push({
+            blockId: newBlock.Id,
+            title: newBlock.Title,
+            type: newBlock.$type
+          });
+        }
+      });
+      
+      return changes;
+    };
+
+    // 🔧 Сравнение настроек схемы (строки схемы)
+    const compareSchemeSettings = (oldJson, newJson) => {
+      const changes = [];
+      
+      const oldScheme = oldJson?.Scheme?.RouteScheme;
+      const newScheme = newJson?.Scheme?.RouteScheme;
+      
+      if (!oldScheme || !newScheme) return changes;
+      
+      const fieldsToCompare = [
+        'Criteria',
+        'Priority',
+        'ShowProcessStages',
+        'ModuleNameGuid',
+        'StoreAsDefaultSetting',
+        'Status'
+      ];
+      
+      fieldsToCompare.forEach(field => {
+        const oldValue = oldScheme[field];
+        const newValue = newScheme[field];
+        
+        if (JSON.stringify(oldValue) !== JSON.stringify(newValue)) {
+          changes.push({
+            field,
+            oldValue: oldValue !== undefined ? oldValue : 'not set',
+            newValue: newValue !== undefined ? newValue : 'not set'
+          });
+        }
+      });
+      
+      // Сравниваем параметры
+      const oldParams = oldScheme.Parameters?.$values || [];
+      const newParams = newScheme.Parameters?.$values || [];
+      
+      if (JSON.stringify(oldParams) !== JSON.stringify(newParams)) {
+        changes.push({
+          field: 'Parameters',
+          oldValue: `${oldParams.length} parameters`,
+          newValue: `${newParams.length} parameters`
+        });
+      }
+      
+      return changes;
+    };
+
     const findDifferences = (oldJson, newJson) => {
       const differences = [];
       
@@ -1843,6 +2005,10 @@ function WorkflowViewer() {
     };
 
     const differences = findDifferences(compareData.old, compareData.new);
+    const blockComparison = compareBlocks(compareData.old, compareData.new);
+    const schemeSettingsComparison = compareSchemeSettings(compareData.old, compareData.new);
+    
+    const [showDetailedAnalysis, setShowDetailedAnalysis] = useState(false);
 
     return (
       <div style={{
@@ -1925,6 +2091,23 @@ function WorkflowViewer() {
             overflow: 'auto',
             padding: '20px'
           }}>
+            <button
+              onClick={() => setShowDetailedAnalysis(true)}
+              style={{
+                padding: '10px 20px',
+                backgroundColor: '#6f42c1',
+                color: 'white',
+                border: 'none',
+                borderRadius: '6px',
+                cursor: 'pointer',
+                fontSize: '14px',
+                marginBottom: '20px',
+                fontWeight: '500'
+              }}
+            >
+              📊 Детальный анализ
+            </button>
+
             {differences.length === 0 ? (
               <div style={{
                 textAlign: 'center',
@@ -2029,6 +2212,236 @@ function WorkflowViewer() {
               </div>
             )}
           </div>
+
+          {/* Модальное окно детального анализа */}
+          {showDetailedAnalysis && (
+            <div style={{
+              position: 'fixed',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              backgroundColor: 'rgba(0,0,0,0.8)',
+              zIndex: 10001,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center'
+            }}>
+              <div style={{
+                backgroundColor: 'white',
+                borderRadius: '12px',
+                width: '90%',
+                maxWidth: '1000px',
+                height: '85%',
+                display: 'flex',
+                flexDirection: 'column',
+                overflow: 'hidden'
+              }}>
+                <div style={{
+                  padding: '20px',
+                  borderBottom: '2px solid #6f42c1',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center'
+                }}>
+                  <h3 style={{ margin: 0, color: '#333' }}>
+                    📊 Детальный анализ изменений
+                  </h3>
+                  <button 
+                    onClick={() => setShowDetailedAnalysis(false)}
+                    style={{
+                      padding: '8px 16px',
+                      backgroundColor: '#dc3545',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '6px',
+                      cursor: 'pointer',
+                      fontSize: '14px'
+                    }}
+                  >
+                    ✕ Закрыть
+                  </button>
+                </div>
+
+                <div style={{
+                  flex: 1,
+                  overflow: 'auto',
+                  padding: '20px'
+                }}>
+                  {/* 🔧 Изменения в блоках */}
+                  <div style={{ marginBottom: '30px' }}>
+                    <h4 style={{ color: '#6f42c1', marginBottom: '15px', borderBottom: '2px solid #6f42c1', paddingBottom: '10px' }}>
+                      🧩 Изменения в блоках
+                    </h4>
+                    
+                    {blockComparison.added.length > 0 && (
+                      <div style={{ marginBottom: '20px' }}>
+                        <h5 style={{ color: '#28a745', marginBottom: '10px' }}>
+                          ➕ Добавленные блоки ({blockComparison.added.length})
+                        </h5>
+                        {blockComparison.added.map((block, idx) => (
+                          <div 
+                            key={idx}
+                            style={{
+                              padding: '12px',
+                              backgroundColor: '#d4edda',
+                              border: '1px solid #c3e6cb',
+                              borderRadius: '6px',
+                              marginBottom: '8px'
+                            }}
+                          >
+                            <div style={{ fontWeight: '600', marginBottom: '5px' }}>
+                              {block.blockId} - {block.title || 'Без названия'}
+                            </div>
+                            <div style={{ fontSize: '11px', color: '#666' }}>
+                              Тип: {block.type}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {blockComparison.removed.length > 0 && (
+                      <div style={{ marginBottom: '20px' }}>
+                        <h5 style={{ color: '#dc3545', marginBottom: '10px' }}>
+                          ➖ Удалённые блоки ({blockComparison.removed.length})
+                        </h5>
+                        {blockComparison.removed.map((block, idx) => (
+                          <div 
+                            key={idx}
+                            style={{
+                              padding: '12px',
+                              backgroundColor: '#f8d7da',
+                              border: '1px solid #f5c6cb',
+                              borderRadius: '6px',
+                              marginBottom: '8px'
+                            }}
+                          >
+                            <div style={{ fontWeight: '600', marginBottom: '5px' }}>
+                              {block.blockId} - {block.title || 'Без названия'}
+                            </div>
+                            <div style={{ fontSize: '11px', color: '#666' }}>
+                              Тип: {block.type}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {blockComparison.modified.length > 0 && (
+                      <div>
+                        <h5 style={{ color: '#ffc107', marginBottom: '10px' }}>
+                          ✏️ Изменённые блоки ({blockComparison.modified.length})
+                        </h5>
+                        {blockComparison.modified.map((block, idx) => (
+                          <div 
+                            key={idx}
+                            style={{
+                              padding: '12px',
+                              backgroundColor: '#fff3cd',
+                              border: '1px solid #ffeeba',
+                              borderRadius: '6px',
+                              marginBottom: '12px'
+                            }}
+                          >
+                            <div style={{ fontWeight: '600', marginBottom: '10px' }}>
+                              {block.blockId} - {block.title || 'Без названия'}
+                            </div>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                              {block.changes.map((change, cIdx) => (
+                                <div 
+                                  key={cIdx}
+                                  style={{
+                                    padding: '8px',
+                                    backgroundColor: 'rgba(255,255,255,0.7)',
+                                    borderRadius: '4px',
+                                    fontSize: '12px'
+                                  }}
+                                >
+                                  <div style={{ fontWeight: '600', marginBottom: '4px', color: '#6f42c1' }}>
+                                    {change.property}:
+                                  </div>
+                                  <div style={{ display: 'flex', gap: '15px', alignItems: 'flex-start' }}>
+                                    <div style={{ flex: 1 }}>
+                                      <span style={{ color: '#dc3545', fontWeight: '500' }}>Было:</span>
+                                      <div style={{ fontFamily: 'monospace', fontSize: '11px', marginTop: '2px', wordBreak: 'break-all' }}>
+                                        {String(change.oldValue)}
+                                      </div>
+                                    </div>
+                                    <div style={{ color: '#6f42c1', fontWeight: 'bold' }}>→</div>
+                                    <div style={{ flex: 1 }}>
+                                      <span style={{ color: '#28a745', fontWeight: '500' }}>Стало:</span>
+                                      <div style={{ fontFamily: 'monospace', fontSize: '11px', marginTop: '2px', wordBreak: 'break-all' }}>
+                                        {String(change.newValue)}
+                                      </div>
+                                    </div>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {blockComparison.added.length === 0 && blockComparison.removed.length === 0 && blockComparison.modified.length === 0 && (
+                      <p style={{ color: '#999', textAlign: 'center', padding: '20px' }}>
+                        Изменений в блоках не найдено
+                      </p>
+                    )}
+                  </div>
+
+                  {/* ⚙️ Изменения в настройках схемы */}
+                  <div>
+                    <h4 style={{ color: '#6f42c1', marginBottom: '15px', borderBottom: '2px solid #6f42c1', paddingBottom: '10px' }}>
+                      ⚙️ Изменения в настройках схемы
+                    </h4>
+                    
+                    {schemeSettingsComparison.length > 0 && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                        {schemeSettingsComparison.map((change, idx) => (
+                          <div 
+                            key={idx}
+                            style={{
+                              padding: '12px',
+                              backgroundColor: '#e7f3ff',
+                              border: '1px solid #b3d9ff',
+                              borderRadius: '6px'
+                            }}
+                          >
+                            <div style={{ fontWeight: '600', marginBottom: '8px', color: '#0066cc' }}>
+                              {change.field}:
+                            </div>
+                            <div style={{ display: 'flex', gap: '15px', alignItems: 'flex-start' }}>
+                              <div style={{ flex: 1 }}>
+                                <span style={{ color: '#dc3545', fontWeight: '500' }}>Было:</span>
+                                <div style={{ fontFamily: 'monospace', fontSize: '11px', marginTop: '2px', wordBreak: 'break-all' }}>
+                                  {String(change.oldValue)}
+                                </div>
+                              </div>
+                              <div style={{ color: '#6f42c1', fontWeight: 'bold' }}>→</div>
+                              <div style={{ flex: 1 }}>
+                                <span style={{ color: '#28a745', fontWeight: '500' }}>Стало:</span>
+                                <div style={{ fontFamily: 'monospace', fontSize: '11px', marginTop: '2px', wordBreak: 'break-all' }}>
+                                  {String(change.newValue)}
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {schemeSettingsComparison.length === 0 && (
+                      <p style={{ color: '#999', textAlign: 'center', padding: '20px' }}>
+                        Изменений в настройках схемы не найдено
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     );
@@ -2171,6 +2584,8 @@ function WorkflowViewer() {
       </div>
 
       {showCompareView && <CompareView />}
+
+      {/* Модальное окно детального анализа - рендерится внутри CompareView через showDetailedAnalysis */}
 
       <style>{`
         .workflow-node {
