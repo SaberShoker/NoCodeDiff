@@ -17,7 +17,8 @@ function WorkflowArea({
   title, 
   onClose, 
   isActive,
-  onActivate 
+  onActivate,
+  onCompare
 }) {
   const [jsonData, setJsonData] = useState(null);
   const [error, setError] = useState(null);
@@ -32,6 +33,21 @@ function WorkflowArea({
   
   // 🔧 Активная вкладка в панели информации
   const [activeInfoTab, setActiveInfoTab] = useState('general');
+  
+  // 🔧 Git состояние
+  const [gitConfig, setGitConfig] = useState({
+    provider: 'github',
+    repository: '',
+    branch: 'main',
+    token: ''
+  });
+  const [gitFiles, setGitFiles] = useState([]);
+  const [selectedGitFile, setSelectedGitFile] = useState(null);
+  const [gitCommits, setGitCommits] = useState([]);
+  const [selectedCommit, setSelectedCommit] = useState(null);
+  const [compareMode, setCompareMode] = useState(false);
+  const [compareData, setCompareData] = useState({ old: null, new: null });
+  const [isLoadingGit, setIsLoadingGit] = useState(false);
 
   // Функция округления координат до сетки
   const snapToGrid = useCallback((value) => {
@@ -63,6 +79,180 @@ function WorkflowArea({
     reader.readAsText(file);
   };
 
+  // 🔧 Загрузка файлов из Git
+  const loadGitFiles = useCallback(async () => {
+    console.log('🔍 Загрузка файлов из Git...', gitConfig);
+    
+    if (!gitConfig.repository || !gitConfig.token) {
+      const errorMsg = !gitConfig.repository 
+        ? '❌ Укажите репозиторий (формат: owner/repo)' 
+        : '❌ Укажите токен доступа GitHub';
+      setError(errorMsg);
+      console.error(errorMsg);
+      return;
+    }
+
+    setIsLoadingGit(true);
+    setError(null);
+    
+    try {
+      const [owner, repo] = gitConfig.repository.split('/');
+      
+      if (!owner || !repo) {
+        throw new Error('Неверный формат репозитория. Используйте: owner/repo');
+      }
+      
+      console.log(`📡 Запрос к GitHub API: ${owner}/${repo}@${gitConfig.branch}`);
+      
+      // 🔧 Добавлен User-Agent и правильные заголовки
+      const response = await fetch(
+        `https://api.github.com/repos/${owner}/${repo}/contents?ref=${gitConfig.branch}`,
+        {
+          headers: {
+            'Authorization': `token ${gitConfig.token}`,
+            'Accept': 'application/vnd.github.v3+json',
+            'User-Agent': 'WorkflowViewer-App/1.0'
+          }
+        }
+      );
+
+      console.log('📥 Ответ GitHub:', response.status, response.statusText);
+      
+      // 🔧 Обработка 403 ошибки
+      if (response.status === 403) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(
+          `403 Forbidden: ${errorData.message || 'Проверьте токен и права доступа'}`
+        );
+      }
+      
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(
+          `GitHub API error ${response.status}: ${errorData.message || response.statusText}`
+        );
+      }
+
+      const files = await response.json();
+      console.log('📁 Найдено файлов:', files.length);
+      
+      const jsonFiles = files.filter(f => {
+        const isJson = f.name.endsWith('.json');
+        console.log(`  - ${f.name} (${f.type}) ${isJson ? '✓' : '✗'}`);
+        return isJson;
+      });
+      
+      console.log('✅ JSON файлов:', jsonFiles.length);
+      setGitFiles(jsonFiles);
+      
+      if (jsonFiles.length === 0) {
+        setError('⚠️ JSON файлы не найдены в репозитории');
+      }
+    } catch (err) {
+      console.error('❌ Ошибка загрузки:', err);
+      setError('Ошибка загрузки из Git: ' + err.message);
+    } finally {
+      setIsLoadingGit(false);
+    }
+  }, [gitConfig]);
+
+  // 🔧 Загрузка содержимого файла из Git
+  const loadGitFileContent = useCallback(async (file) => {
+    setIsLoadingGit(true);
+    try {
+      const response = await fetch(file.download_url);
+      const json = await response.json();
+      setJsonData(json);
+      setSelectedGitFile(file);
+      setError(null);
+      parseWorkflowData(json);
+    } catch (err) {
+      setError('Ошибка загрузки файла: ' + err.message);
+    } finally {
+      setIsLoadingGit(false);
+    }
+  }, []);
+
+  // 🔧 Загрузка коммитов для сравнения
+  const loadGitCommits = useCallback(async () => {
+    if (!gitConfig.repository || !gitConfig.token || !selectedGitFile) {
+      setError('Выберите файл из репозитория');
+      return;
+    }
+
+    setIsLoadingGit(true);
+    try {
+      const [owner, repo] = gitConfig.repository.split('/');
+      const response = await fetch(
+        `https://api.github.com/repos/${owner}/${repo}/commits?path=${selectedGitFile.path}&sha=${gitConfig.branch}`,
+        {
+          headers: {
+            'Authorization': `token ${gitConfig.token}`,
+            'Accept': 'application/vnd.github.v3+json'
+          }
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(`GitHub API error: ${response.status}`);
+      }
+
+      const commits = await response.json();
+      setGitCommits(commits.slice(0, 10));
+    } catch (err) {
+      setError('Ошибка загрузки коммитов: ' + err.message);
+    } finally {
+      setIsLoadingGit(false);
+    }
+  }, [gitConfig, selectedGitFile]);
+
+  // 🔧 Загрузка версии файла по коммиту
+  const loadCommitVersion = useCallback(async (commit, versionType) => {
+    setIsLoadingGit(true);
+    try {
+      const [owner, repo] = gitConfig.repository.split('/');
+      const response = await fetch(
+        `https://api.github.com/repos/${owner}/${repo}/contents/${selectedGitFile.path}?ref=${commit.sha}`,
+        {
+          headers: {
+            'Authorization': `token ${gitConfig.token}`,
+            'Accept': 'application/vnd.github.v3+json'
+          }
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(`GitHub API error: ${response.status}`);
+      }
+
+      const fileData = await response.json();
+      const content = atob(fileData.content);
+      const json = JSON.parse(content);
+
+      setCompareData(prev => ({
+        ...prev,
+        [versionType]: { commit, json }
+      }));
+    } catch (err) {
+      setError('Ошибка загрузки версии: ' + err.message);
+    } finally {
+      setIsLoadingGit(false);
+    }
+  }, [gitConfig, selectedGitFile]);
+
+  // 🔧 Выполнение сравнения двух версий
+  const executeCompare = useCallback(() => {
+    if (compareData.old && compareData.new) {
+      setCompareMode(true);
+      onCompare({
+        old: compareData.old.json,
+        new: compareData.new.json,
+        oldCommit: compareData.old.commit,
+        newCommit: compareData.new.commit
+      });
+    }
+  }, [compareData, onCompare]);
+
   const handleReset = () => {
     setJsonData(null);
     setError(null);
@@ -73,6 +263,8 @@ function WorkflowArea({
     setBlocksCollection([]);
     setIsInitialLoad(true);
     setActiveInfoTab('general');
+    setCompareMode(false);
+    setCompareData({ old: null, new: null });
   };
 
   const parseWorkflowData = useCallback((json) => {
@@ -86,10 +278,8 @@ function WorkflowArea({
     const edgesCollection = routeScheme.Edges?.$values || [];
     const blocksLayout = layout.BlocksLayout?.$values || [];
 
-    // 🔧 Сохраняем полную коллекцию блоков для последующего использования
     setBlocksCollection(blocksCollection);
 
-    // Парсим блоки из BlocksLayout с заголовками из Blocks
     const parsedNodes = blocksLayout.map(blockLayout => {
       const blockId = blockLayout.BlockId;
       const fullBlock = blocksCollection.find(b => b.Id === blockId);
@@ -98,13 +288,13 @@ function WorkflowArea({
       return {
         id: blockId,
         position: { 
-          x: snapToGrid(blockLayout.Bounds.X),
-          y: snapToGrid(blockLayout.Bounds.Y)
+            x: snapToGrid(blockLayout.Bounds.X),
+            y: snapToGrid(blockLayout.Bounds.Y)
         },
         data: { 
-          label: fullBlock?.Title || blockId,
-          blockType: blockType,
-          fullBlock: fullBlock // 🔧 Сохраняем полную информацию о блоке
+            label: fullBlock?.Title || blockId,
+            blockType: blockType,
+            fullBlock: fullBlock
         },
         style: getBlockStyle(blockType, false),
         draggable: true,
@@ -112,7 +302,6 @@ function WorkflowArea({
       };
     });
 
-    // Парсим края из Edges
     const parsedEdges = edgesCollection.map(edge => ({
       id: `edge-${edge.Id}`,
       source: edge.Source,
@@ -143,7 +332,6 @@ function WorkflowArea({
     }
   }, [nodes.length, isInitialLoad]);
 
-  // Обработчик окончания перетаскивания
   const onNodeDragStop = useCallback((event, node) => {
     const snappedPosition = {
       x: snapToGrid(node.position.x),
@@ -161,87 +349,37 @@ function WorkflowArea({
     }));
   }, [setNodes, snapToGrid]);
 
-  // 🔧 Получаем детальную информацию о блоке из сохранённой коллекции
   const getBlockDetails = useCallback((blockId) => {
     const block = blocksCollection.find(b => b.Id === blockId);
     if (!block) return null;
     
     return {
-      // Основная информация
       id: block.Id,
       title: block.Title || 'Без названия',
       type: getBlockTypeName(block.$type),
       typeId: block.BlockTypeId,
       versionId: block.VersionId,
       description: block.Description || 'Нет описания',
-      createdInTaskGuid: block.CreatedInTaskGuid,
-      processStagesDisplayMode: block.ProcessStagesDisplayMode,
-      timeoutErrorsCount: block.TimeoutErrorsCount,
-      
-      // 🔧 GroupsAttachmentsRights
       groupsAttachmentsRights: block.GroupsAttachmentsRights?.$values || [],
-      
-      // 🔧 AttachmentGroupsSettings
       attachmentGroupsSettings: block.AttachmentGroupsSettings?.$values || [],
-      
-      // 🔧 PropertyExpressions
       propertyExpressions: block.PropertyExpressions?.$values || [],
-      
-      // 🔧 ParameterOperations
       parameterOperations: block.ParameterOperations?.$values || [],
-      
-      // 🔧 Operations
       operations: block.Operations?.$values || [],
-      
-      // Специфичные поля для разных типов блоков
       executionResults: block.ExecutionResults?.$values || [],
       customExecutionResults: block.CustomExecutionResults?.$values || [],
-      stopResults: block.StopResults?.$values || [],
       deadline: block.AbsoluteDeadline || block.RelativeDeadline || 'Не установлен',
       isParallel: block.IsParallel || false,
       isCompetitive: block.IsCompetitive || false,
-      isStopped: block.IsStopped || false,
-      isWithAbsences: block.IsWithAbsences || false,
-      hasStopDeadline: block.HasStopDeadline || false,
       performers: block.SidsOfPerformers?.$values?.length || 0,
-      resultVariableName: block.ResultVariableName,
-      result: block.Result,
-      noPerformersResult: block.NoPerformersResult,
-      instruction: block.Instruction,
-      subject: block.Subject,
-      threadSubject: block.ThreadSubject,
-      typeName: block.TypeName,
-      typeGuid: block.TypeGuid,
-      author: block.Author,
-      text: block.Text,
-      
-      // Для AssignmentBlock
-      relativeDeadlineDays: block.RelativeDeadlineDays,
-      relativeDeadlineHours: block.RelativeDeadlineHours,
-      absoluteDeadlineInternal: block.AbsoluteDeadlineInternal,
-      stopResults: block.StopResults,
-      
-      // Для ScriptBlock
-      customTypeProperties: block.CustomTypeProperties?.$values || [],
-      
-      // Для DecisionBlock
-      conditionExpressions: block.ConditionExpressions?.$values || [],
-      
-      // Для NoticeBlock
-      sidsOfPerformers: block.SidsOfPerformers?.$values || [],
-      
-      // Для WaitingBlock
-      relativeDeadline: block.RelativeDeadline,
-      deadlineInternal: block.DeadlineInternal
+      customTypeProperties: block.CustomTypeProperties?.$values || []
     };
   }, [blocksCollection]);
 
-  // Обработчик клика на узел
   const onNodeClick = useCallback((event, node) => {
     onActivate(areaId);
     setSelectedNodeId(node.id);
     setSelectedEdgeId(null);
-    setActiveInfoTab('general'); // Сбрасываем на первую вкладку
+    setActiveInfoTab('general');
     
     setNodes(nds => nds.map(n => {
       if (n.id === node.id) {
@@ -267,7 +405,6 @@ function WorkflowArea({
     }));
   }, [setNodes, areaId, onActivate]);
 
-  // Обработчик клика на край
   const onEdgeClick = useCallback((event, edge) => {
     onActivate(areaId);
     setSelectedEdgeId(edge.id);
@@ -302,7 +439,6 @@ function WorkflowArea({
     }));
   }, [setEdges, areaId, onActivate]);
 
-  // Обработчик клика на пустое пространство
   const onPaneClick = useCallback(() => {
     onActivate(areaId);
     setSelectedNodeId(null);
@@ -328,7 +464,6 @@ function WorkflowArea({
     })));
   }, [setNodes, setEdges, areaId, onActivate]);
 
-  // Вспомогательные функции
   function getBlockType(block) {
     if (!block) return 'unknown';
     
@@ -379,10 +514,17 @@ function WorkflowArea({
     };
   }
 
-  // 🔧 Получаем текущий выбранный блок
   const selectedBlockDetails = selectedNodeId ? getBlockDetails(selectedNodeId) : null;
 
-  // Экран загрузки файла
+  const infoTabs = [
+    { id: 'general', label: '📋 Основное', count: null },
+    { id: 'rights', label: '🔐 Права', count: selectedBlockDetails?.groupsAttachmentsRights?.length || 0 },
+    { id: 'attachments', label: '📎 Вложения', count: selectedBlockDetails?.attachmentGroupsSettings?.length || 0 },
+    { id: 'properties', label: '⚙️ Свойства', count: selectedBlockDetails?.propertyExpressions?.length || 0 },
+    { id: 'parameters', label: '📊 Параметры', count: selectedBlockDetails?.parameterOperations?.length || 0 },
+    { id: 'operations', label: '🔧 Операции', count: selectedBlockDetails?.operations?.length || 0 }
+  ];
+
   if (!jsonData) {
     return (
       <div style={{ 
@@ -399,7 +541,6 @@ function WorkflowArea({
         borderRadius: '12px',
         position: 'relative'
       }}>
-        {/* Кнопка закрытия области */}
         <button 
           onClick={onClose}
           style={{
@@ -421,34 +562,261 @@ function WorkflowArea({
         </button>
 
         <div style={{ 
-          padding: '40px', 
+          padding: '30px', 
           textAlign: 'center',
           border: '2px dashed #ccc',
           borderRadius: '12px',
           backgroundColor: 'white',
           boxShadow: '0 2px 10px rgba(0,0,0,0.1)',
-          maxWidth: '400px',
+          maxWidth: '500px',
           width: '100%'
         }}>
           <h3 style={{ marginBottom: '15px', color: '#333' }}>
             {title}
           </h3>
-          <p style={{ color: '#666', fontSize: '13px', marginBottom: '20px' }}>
-            Загрузите JSON файл со схемой маршрута
-          </p>
-          <input 
-            type="file" 
-            accept=".json" 
-            onChange={handleFileUpload}
-            style={{ 
-              margin: '10px',
-              padding: '10px',
-              border: '1px solid #ddd',
-              borderRadius: '4px',
-              width: '100%',
-              boxSizing: 'border-box'
-            }}
-          />
+          
+          <div style={{ marginBottom: '20px' }}>
+            <p style={{ color: '#666', fontSize: '13px', marginBottom: '15px' }}>
+              Загрузите JSON файл со схемой маршрута
+            </p>
+            
+            <input 
+              type="file" 
+              accept=".json" 
+              onChange={handleFileUpload}
+              style={{ 
+                margin: '10px 0',
+                padding: '10px',
+                border: '1px solid #ddd',
+                borderRadius: '4px',
+                width: '100%',
+                boxSizing: 'border-box'
+              }}
+            />
+            
+            <div style={{ 
+              marginTop: '20px', 
+              padding: '15px', 
+              backgroundColor: '#f8f9fa', 
+              borderRadius: '8px',
+              border: '1px solid #ddd'
+            }}>
+              <h4 style={{ margin: '0 0 10px 0', color: '#333', fontSize: '14px' }}>
+                📦 Загрузка из Git
+              </h4>
+              
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '10px' }}>
+                <input 
+                  type="text" 
+                  placeholder="owner/repo" 
+                  value={gitConfig.repository}
+                  onChange={(e) => setGitConfig(prev => ({ ...prev, repository: e.target.value }))}
+                  style={{ 
+                    padding: '8px', 
+                    border: '1px solid #ddd', 
+                    borderRadius: '4px',
+                    fontSize: '13px'
+                  }}
+                />
+                <input 
+                  type="text" 
+                  placeholder="branch (main)" 
+                  value={gitConfig.branch}
+                  onChange={(e) => setGitConfig(prev => ({ ...prev, branch: e.target.value }))}
+                  style={{ 
+                    padding: '8px', 
+                    border: '1px solid #ddd', 
+                    borderRadius: '4px',
+                    fontSize: '13px'
+                  }}
+                />
+              </div>
+              
+              <input 
+                type="password" 
+                placeholder="GitHub Token" 
+                value={gitConfig.token}
+                onChange={(e) => setGitConfig(prev => ({ ...prev, token: e.target.value }))}
+                style={{ 
+                  padding: '8px', 
+                  border: '1px solid #ddd', 
+                  borderRadius: '4px',
+                  width: '100%',
+                  boxSizing: 'border-box',
+                  marginBottom: '10px',
+                  fontSize: '13px'
+                }}
+              />
+              
+              <button 
+                onClick={() => {
+                  console.log('🖱️ Клик по кнопке загрузки');
+                  loadGitFiles();
+                }}
+                disabled={isLoadingGit}
+                style={{ 
+                  padding: '8px 16px', 
+                  backgroundColor: '#28a745', 
+                  color: 'white', 
+                  border: 'none', 
+                  borderRadius: '4px',
+                  cursor: isLoadingGit ? 'not-allowed' : 'pointer',
+                  fontSize: '13px',
+                  opacity: isLoadingGit ? 0.7 : 1,
+                  transition: 'all 0.2s'
+                }}
+                onMouseOver={(e) => {
+                  if (!isLoadingGit) e.target.style.backgroundColor = '#218838';
+                }}
+                onMouseOut={(e) => {
+                  if (!isLoadingGit) e.target.style.backgroundColor = '#28a745';
+                }}
+              >
+                {isLoadingGit ? '⏳ Загрузка...' : '📂 Загрузить файлы'}
+              </button>
+              {error && gitConfig.repository && gitConfig.token && (
+                <p style={{ 
+                  color: '#dc3545', 
+                  marginTop: '10px', 
+                  fontSize: '12px',
+                  padding: '8px',
+                  backgroundColor: '#f8d7da',
+                  borderRadius: '4px',
+                  border: '1px solid #f5c6cb'
+                }}>
+                  ⚠️ {error}
+                </p>
+              )}
+              {gitFiles.length > 0 && (
+                <div style={{ 
+                  marginTop: '15px', 
+                  maxHeight: '200px', 
+                  overflowY: 'auto',
+                  border: '1px solid #ddd',
+                  borderRadius: '4px'
+                }}>
+                  {gitFiles.map(file => (
+                    <div 
+                      key={file.path}
+                      onClick={() => loadGitFileContent(file)}
+                      style={{
+                        padding: '8px 12px',
+                        borderBottom: '1px solid #eee',
+                        cursor: 'pointer',
+                        backgroundColor: selectedGitFile?.path === file.path ? '#e3f2fd' : 'white',
+                        fontSize: '12px',
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center'
+                      }}
+                    >
+                      <span>📄 {file.name}</span>
+                      {selectedGitFile?.path === file.path && (
+                        <span style={{ color: '#28a745', fontSize: '11px' }}>✓ Выбран</span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+              
+              {selectedGitFile && (
+                <div style={{ marginTop: '15px', paddingTop: '15px', borderTop: '1px solid #ddd' }}>
+                  <button 
+                    onClick={loadGitCommits}
+                    disabled={isLoadingGit}
+                    style={{ 
+                      padding: '8px 16px', 
+                      backgroundColor: '#17a2b8', 
+                      color: 'white', 
+                      border: 'none', 
+                      borderRadius: '4px',
+                      cursor: isLoadingGit ? 'not-allowed' : 'pointer',
+                      fontSize: '13px',
+                      marginRight: '10px'
+                    }}
+                  >
+                    📜 История коммитов
+                  </button>
+                  
+                  {compareData.old && compareData.new && (
+                    <button 
+                      onClick={executeCompare}
+                      style={{ 
+                        padding: '8px 16px', 
+                        backgroundColor: '#6f42c1', 
+                        color: 'white', 
+                        border: 'none', 
+                        borderRadius: '4px',
+                        cursor: 'pointer',
+                        fontSize: '13px'
+                      }}
+                    >
+                      🔍 Сравнить версии
+                    </button>
+                  )}
+                </div>
+              )}
+              
+              {gitCommits.length > 0 && (
+                <div style={{ 
+                  marginTop: '15px',
+                  padding: '10px',
+                  backgroundColor: '#fff3cd',
+                  borderRadius: '4px',
+                  border: '1px solid #ffc107'
+                }}>
+                  <h5 style={{ margin: '0 0 10px 0', fontSize: '13px', color: '#856404' }}>
+                    Выберите 2 версии для сравнения:
+                  </h5>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                    <select 
+                      onChange={(e) => {
+                        const commit = gitCommits.find(c => c.sha === e.target.value);
+                        if (commit) loadCommitVersion(commit, 'old');
+                      }}
+                      style={{ padding: '6px', fontSize: '12px', borderRadius: '4px' }}
+                    >
+                      <option value="">Старая версия</option>
+                      {gitCommits.map(commit => (
+                        <option key={commit.sha} value={commit.sha}>
+                          {commit.sha.substring(0, 7)} - {commit.commit.message.substring(0, 30)}
+                        </option>
+                      ))}
+                    </select>
+                    
+                    <select 
+                      onChange={(e) => {
+                        const commit = gitCommits.find(c => c.sha === e.target.value);
+                        if (commit) loadCommitVersion(commit, 'new');
+                      }}
+                      style={{ padding: '6px', fontSize: '12px', borderRadius: '4px' }}
+                    >
+                      <option value="">Новая версия</option>
+                      {gitCommits.map(commit => (
+                        <option key={commit.sha} value={commit.sha}>
+                          {commit.sha.substring(0, 7)} - {commit.commit.message.substring(0, 30)}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  
+                  {compareData.old && compareData.new && (
+                    <div style={{ 
+                      marginTop: '10px', 
+                      padding: '8px', 
+                      backgroundColor: '#d4edda', 
+                      borderRadius: '4px',
+                      fontSize: '12px',
+                      color: '#155724'
+                    }}>
+                      ✓ Готово к сравнению: {compareData.old.commit.sha.substring(0, 7)} → {compareData.new.commit.sha.substring(0, 7)}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+          
           {error && (
             <p style={{ color: 'red', marginTop: '15px', fontSize: '13px' }}>{error}</p>
           )}
@@ -457,7 +825,6 @@ function WorkflowArea({
     );
   }
 
-  // Проверка структуры данных
   if (!jsonData?.Scheme?.RouteScheme?.Layout?.BlocksLayout) {
     return (
       <div style={{ 
@@ -521,17 +888,6 @@ function WorkflowArea({
     );
   }
 
-  // 🔧 Вкладки для панели информации
-  const infoTabs = [
-    { id: 'general', label: '📋 Основное', count: null },
-    { id: 'rights', label: '🔐 Права', count: selectedBlockDetails?.groupsAttachmentsRights?.length || 0 },
-    { id: 'attachments', label: '📎 Вложения', count: selectedBlockDetails?.attachmentGroupsSettings?.length || 0 },
-    { id: 'properties', label: '⚙️ Свойства', count: selectedBlockDetails?.propertyExpressions?.length || 0 },
-    { id: 'parameters', label: '📊 Параметры', count: selectedBlockDetails?.parameterOperations?.length || 0 },
-    { id: 'operations', label: '🔧 Операции', count: selectedBlockDetails?.operations?.length || 0 }
-  ];
-
-  // Отображение схемы
   return (
     <div style={{ 
       width: '100%',
@@ -542,7 +898,6 @@ function WorkflowArea({
       overflow: 'hidden',
       boxSizing: 'border-box'
     }}>
-      {/* Заголовок области */}
       <div style={{
         position: 'absolute',
         top: '10px',
@@ -561,6 +916,16 @@ function WorkflowArea({
         <span style={{ marginLeft: '15px', color: '#666' }}>
           {nodes.length} блоков • {edges.length} связей
         </span>
+        {selectedGitFile && (
+          <span style={{ marginLeft: '15px', color: '#28a745', fontSize: '11px' }}>
+            📦 {selectedGitFile.name}
+          </span>
+        )}
+        {compareMode && (
+          <span style={{ marginLeft: '15px', color: '#6f42c1', fontSize: '11px' }}>
+            🔍 Режим сравнения
+          </span>
+        )}
         {selectedNodeId && (
           <span style={{ marginLeft: '15px', color: '#dc3545' }}>
             Выбран: {selectedNodeId}
@@ -568,7 +933,6 @@ function WorkflowArea({
         )}
       </div>
 
-      {/* Кнопка сброса */}
       <button 
         onClick={handleReset}
         style={{
@@ -593,7 +957,6 @@ function WorkflowArea({
         📁 Новый файл
       </button>
 
-      {/* 🔧 Панель детальной информации о блоке с вкладками */}
       {selectedBlockDetails && (
         <div style={{
           position: 'absolute',
@@ -612,7 +975,6 @@ function WorkflowArea({
           display: 'flex',
           flexDirection: 'column'
         }}>
-          {/* Заголовок панели с кнопкой закрытия */}
           <div style={{ 
             display: 'flex', 
             justifyContent: 'space-between', 
@@ -640,7 +1002,6 @@ function WorkflowArea({
             </button>
           </div>
 
-          {/* Вкладки */}
           <div style={{
             display: 'flex',
             borderBottom: '1px solid #ddd',
@@ -692,14 +1053,12 @@ function WorkflowArea({
             ))}
           </div>
 
-          {/* Содержимое вкладок */}
           <div style={{
             padding: '15px',
             overflowY: 'auto',
             flex: 1,
             maxHeight: '350px'
           }}>
-            {/* 🔧 Вкладка: Основное */}
             {activeInfoTab === 'general' && (
               <div>
                 <div style={{ marginBottom: '12px' }}>
@@ -733,17 +1092,8 @@ function WorkflowArea({
                       <span style={{ color: '#555' }}>{selectedBlockDetails.description}</span>
                     </div>
                   )}
-                  <div style={{ marginBottom: '6px', fontSize: '10px', color: '#666' }}>
-                    <strong>BlockTypeId:</strong>{' '}
-                    <span style={{ fontFamily: 'monospace' }}>{selectedBlockDetails.typeId?.substring(0, 36)}...</span>
-                  </div>
-                  <div style={{ marginBottom: '6px', fontSize: '10px', color: '#666' }}>
-                    <strong>VersionId:</strong>{' '}
-                    <span style={{ fontFamily: 'monospace' }}>{selectedBlockDetails.versionId?.substring(0, 36)}...</span>
-                  </div>
                 </div>
 
-                {/* Специфичная информация */}
                 <div style={{ 
                   display: 'grid', 
                   gridTemplateColumns: '1fr 1fr', 
@@ -780,7 +1130,6 @@ function WorkflowArea({
                   )}
                 </div>
 
-                {/* Результаты выполнения */}
                 {selectedBlockDetails.executionResults?.length > 0 && (
                   <div style={{ 
                     marginBottom: '12px', 
@@ -810,7 +1159,6 @@ function WorkflowArea({
                   </div>
                 )}
 
-                {/* Кастомные свойства */}
                 {selectedBlockDetails.customTypeProperties?.length > 0 && (
                   <div style={{ 
                     padding: '8px', 
@@ -840,7 +1188,6 @@ function WorkflowArea({
               </div>
             )}
 
-            {/* 🔧 Вкладка: Права доступа (GroupsAttachmentsRights) */}
             {activeInfoTab === 'rights' && (
               <div>
                 <h5 style={{ margin: '0 0 10px 0', color: '#007bff', fontSize: '12px' }}>
@@ -868,16 +1215,6 @@ function WorkflowArea({
                           <strong>Права:</strong>{' '}
                           <span style={{ color: '#28a745' }}>{right.AttachmentsRights}</span>
                         </div>
-                        <div style={{ fontSize: '10px', marginBottom: '4px' }}>
-                          <strong>Тип прав:</strong>{' '}
-                          <span style={{ fontFamily: 'monospace' }}>{right.AttachmentsRightsTypeString?.substring(0, 36)}...</span>
-                        </div>
-                        <div style={{ fontSize: '10px' }}>
-                          <strong>Не выше инициатора:</strong>{' '}
-                          <span style={{ color: right.IsNotGreaterInitiatorRights ? '#dc3545' : '#28a745' }}>
-                            {right.IsNotGreaterInitiatorRights ? 'Да' : 'Нет'}
-                          </span>
-                        </div>
                       </div>
                     ))}
                   </div>
@@ -889,7 +1226,6 @@ function WorkflowArea({
               </div>
             )}
 
-            {/* 🔧 Вкладка: Вложения (AttachmentGroupsSettings) */}
             {activeInfoTab === 'attachments' && (
               <div>
                 <h5 style={{ margin: '0 0 10px 0', color: '#007bff', fontSize: '12px' }}>
@@ -920,21 +1256,9 @@ function WorkflowArea({
                           </span>
                         </div>
                         <div style={{ fontSize: '10px', marginBottom: '4px' }}>
-                          <strong>Включена:</strong>{' '}
-                          <span style={{ color: setting.IsEnabled ? '#28a745' : '#999' }}>
-                            {setting.IsEnabled ? 'Да' : 'Нет'}
-                          </span>
-                        </div>
-                        <div style={{ fontSize: '10px', marginBottom: '4px' }}>
                           <strong>Обязательна:</strong>{' '}
                           <span style={{ color: setting.IsRequired ? '#28a745' : '#999' }}>
                             {setting.IsRequired ? 'Да' : 'Нет'}
-                          </span>
-                        </div>
-                        <div style={{ fontSize: '10px' }}>
-                          <strong>Родительская группа:</strong>{' '}
-                          <span style={{ color: setting.IsParentTaskGroup ? '#28a745' : '#999' }}>
-                            {setting.IsParentTaskGroup ? 'Да' : 'Нет'}
                           </span>
                         </div>
                       </div>
@@ -948,7 +1272,6 @@ function WorkflowArea({
               </div>
             )}
 
-            {/* 🔧 Вкладка: Свойства (PropertyExpressions) */}
             {activeInfoTab === 'properties' && (
               <div>
                 <h5 style={{ margin: '0 0 10px 0', color: '#007bff', fontSize: '12px' }}>
@@ -970,12 +1293,6 @@ function WorkflowArea({
                           <strong>Свойство:</strong>{' '}
                           <span style={{ color: '#007bff', fontWeight: '600' }}>{expr.PropertyName}</span>
                         </div>
-                        <div style={{ fontSize: '10px', marginBottom: '4px' }}>
-                          <strong>Property ID:</strong>{' '}
-                          <span style={{ fontFamily: 'monospace', color: '#666' }}>
-                            {expr.PropertyId?.substring(0, 36)}...
-                          </span>
-                        </div>
                         {expr.Expression?.Description && (
                           <div style={{ fontSize: '10px', color: '#555' }}>
                             <strong>Описание:</strong> {expr.Expression.Description}
@@ -992,7 +1309,6 @@ function WorkflowArea({
               </div>
             )}
 
-            {/* 🔧 Вкладка: Параметры (ParameterOperations) */}
             {activeInfoTab === 'parameters' && (
               <div>
                 <h5 style={{ margin: '0 0 10px 0', color: '#007bff', fontSize: '12px' }}>
@@ -1028,12 +1344,6 @@ function WorkflowArea({
                             <span style={{ color: '#007bff' }}>{op.ExecutionResultCode}</span>
                           </div>
                         )}
-                        <div style={{ fontSize: '10px', marginBottom: '4px' }}>
-                          <strong>Параметр:</strong>{' '}
-                          <span style={{ fontFamily: 'monospace', color: '#666' }}>
-                            {op.ParameterUuid?.substring(0, 36)}...
-                          </span>
-                        </div>
                         <div style={{ fontSize: '10px' }}>
                           <strong>Операция:</strong>{' '}
                           <span style={{ color: '#28a745' }}>{op.OperationType}</span>
@@ -1049,7 +1359,6 @@ function WorkflowArea({
               </div>
             )}
 
-            {/* 🔧 Вкладка: Операции (Operations) */}
             {activeInfoTab === 'operations' && (
               <div>
                 <h5 style={{ margin: '0 0 10px 0', color: '#007bff', fontSize: '12px' }}>
@@ -1094,11 +1403,6 @@ function WorkflowArea({
                             <strong>Цель:</strong> {op.DestinationProperty.Description}
                           </div>
                         )}
-                        {op.Value?.Description && (
-                          <div style={{ fontSize: '10px', color: '#555' }}>
-                            <strong>Значение:</strong> {op.Value.Description}
-                          </div>
-                        )}
                       </div>
                     ))}
                   </div>
@@ -1111,7 +1415,6 @@ function WorkflowArea({
             )}
           </div>
 
-          {/* Подсказка */}
           <div style={{ 
             padding: '8px 15px', 
             borderTop: '1px dashed #ddd',
@@ -1125,7 +1428,6 @@ function WorkflowArea({
         </div>
       )}
 
-      {/* ReactFlow */}
       <ReactFlow 
         nodes={nodes} 
         edges={edges} 
@@ -1193,15 +1495,17 @@ function WorkflowViewer() {
     { id: 1, title: 'Схема 1', active: true }
   ]);
   const [activeAreaId, setActiveAreaId] = useState(1);
+  const [compareData, setCompareData] = useState(null);
+  const [showCompareView, setShowCompareView] = useState(false);
 
   const addArea = () => {
-    if (areas.length >= 2) return; // Максимум 2 области
+    if (areas.length >= 2) return;
     const newId = Math.max(...areas.map(a => a.id)) + 1;
     setAreas([...areas, { id: newId, title: `Схема ${newId}`, active: false }]);
   };
 
   const removeArea = (id) => {
-    if (areas.length <= 1) return; // Минимум 1 область
+    if (areas.length <= 1) return;
     const newAreas = areas.filter(a => a.id !== id);
     setAreas(newAreas);
     if (activeAreaId === id) {
@@ -1217,6 +1521,248 @@ function WorkflowViewer() {
     })));
   };
 
+  const handleCompare = useCallback((data) => {
+    setCompareData(data);
+    setShowCompareView(true);
+  }, []);
+
+  const CompareView = () => {
+    if (!compareData) return null;
+
+    const findDifferences = (oldJson, newJson) => {
+      const differences = [];
+      
+      const oldBlocks = oldJson?.Scheme?.RouteScheme?.Blocks?.$values || [];
+      const newBlocks = newJson?.Scheme?.RouteScheme?.Blocks?.$values || [];
+      
+      oldBlocks.forEach(oldBlock => {
+        const newBlock = newBlocks.find(b => b.Id === oldBlock.Id);
+        if (!newBlock) {
+          differences.push({ type: 'removed', blockId: oldBlock.Id, block: oldBlock });
+        } else {
+          if (oldBlock.Title !== newBlock.Title) {
+            differences.push({ 
+              type: 'modified', 
+              blockId: oldBlock.Id, 
+              property: 'Title',
+              oldValue: oldBlock.Title,
+              newValue: newBlock.Title
+            });
+          }
+          if (oldBlock.$type !== newBlock.$type) {
+            differences.push({ 
+              type: 'modified', 
+              blockId: oldBlock.Id, 
+              property: 'Type',
+              oldValue: oldBlock.$type,
+              newValue: newBlock.$type
+            });
+          }
+        }
+      });
+      
+      newBlocks.forEach(newBlock => {
+        const oldBlock = oldBlocks.find(b => b.Id === newBlock.Id);
+        if (!oldBlock) {
+          differences.push({ type: 'added', blockId: newBlock.Id, block: newBlock });
+        }
+      });
+      
+      return differences;
+    };
+
+    const differences = findDifferences(compareData.old, compareData.new);
+
+    return (
+      <div style={{
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        backgroundColor: 'rgba(0,0,0,0.8)',
+        zIndex: 10000,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center'
+      }}>
+        <div style={{
+          backgroundColor: 'white',
+          borderRadius: '12px',
+          width: '90%',
+          maxWidth: '1200px',
+          height: '80%',
+          display: 'flex',
+          flexDirection: 'column',
+          overflow: 'hidden'
+        }}>
+          <div style={{
+            padding: '20px',
+            borderBottom: '2px solid #007bff',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center'
+          }}>
+            <h3 style={{ margin: 0, color: '#333' }}>
+              🔍 Сравнение версий схемы
+            </h3>
+            <button 
+              onClick={() => setShowCompareView(false)}
+              style={{
+                padding: '8px 16px',
+                backgroundColor: '#dc3545',
+                color: 'white',
+                border: 'none',
+                borderRadius: '6px',
+                cursor: 'pointer',
+                fontSize: '14px'
+              }}
+            >
+              ✕ Закрыть
+            </button>
+          </div>
+
+          <div style={{
+            padding: '15px 20px',
+            backgroundColor: '#f8f9fa',
+            borderBottom: '1px solid #ddd',
+            display: 'flex',
+            gap: '20px'
+          }}>
+            <div>
+              <strong>Старая версия:</strong>{' '}
+              <span style={{ fontFamily: 'monospace', color: '#dc3545' }}>
+                {compareData.oldCommit?.sha?.substring(0, 7) || 'N/A'}
+              </span>
+              <div style={{ fontSize: '12px', color: '#666' }}>
+                {compareData.oldCommit?.commit?.message?.substring(0, 50) || 'N/A'}...
+              </div>
+            </div>
+            <div>
+              <strong>Новая версия:</strong>{' '}
+              <span style={{ fontFamily: 'monospace', color: '#28a745' }}>
+                {compareData.newCommit?.sha?.substring(0, 7) || 'N/A'}
+              </span>
+              <div style={{ fontSize: '12px', color: '#666' }}>
+                {compareData.newCommit?.commit?.message?.substring(0, 50) || 'N/A'}...
+              </div>
+            </div>
+          </div>
+
+          <div style={{
+            flex: 1,
+            overflow: 'auto',
+            padding: '20px'
+          }}>
+            {differences.length === 0 ? (
+              <div style={{
+                textAlign: 'center',
+                padding: '40px',
+                color: '#28a745'
+              }}>
+                <h4>✓ Изменений не найдено</h4>
+                <p>Схемы идентичны</p>
+              </div>
+            ) : (
+              <div>
+                <h4 style={{ marginBottom: '15px' }}>
+                  Найдено изменений: {differences.length}
+                </h4>
+                
+                {differences.filter(d => d.type === 'added').length > 0 && (
+                  <div style={{ marginBottom: '20px' }}>
+                    <h5 style={{ color: '#28a745', marginBottom: '10px' }}>
+                      ➕ Добавленные блоки ({differences.filter(d => d.type === 'added').length})
+                    </h5>
+                    {differences.filter(d => d.type === 'added').map((diff, idx) => (
+                      <div 
+                        key={idx}
+                        style={{
+                          padding: '10px',
+                          backgroundColor: '#d4edda',
+                          border: '1px solid #c3e6cb',
+                          borderRadius: '4px',
+                          marginBottom: '8px',
+                          fontFamily: 'monospace',
+                          fontSize: '12px'
+                        }}
+                      >
+                        {diff.blockId} - {diff.block?.Title || 'Без названия'}
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {differences.filter(d => d.type === 'removed').length > 0 && (
+                  <div style={{ marginBottom: '20px' }}>
+                    <h5 style={{ color: '#dc3545', marginBottom: '10px' }}>
+                      ➖ Удалённые блоки ({differences.filter(d => d.type === 'removed').length})
+                    </h5>
+                    {differences.filter(d => d.type === 'removed').map((diff, idx) => (
+                      <div 
+                        key={idx}
+                        style={{
+                          padding: '10px',
+                          backgroundColor: '#f8d7da',
+                          border: '1px solid #f5c6cb',
+                          borderRadius: '4px',
+                          marginBottom: '8px',
+                          fontFamily: 'monospace',
+                          fontSize: '12px'
+                        }}
+                      >
+                        {diff.blockId} - {diff.block?.Title || 'Без названия'}
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {differences.filter(d => d.type === 'modified').length > 0 && (
+                  <div>
+                    <h5 style={{ color: '#ffc107', marginBottom: '10px' }}>
+                      ✏️ Изменённые свойства ({differences.filter(d => d.type === 'modified').length})
+                    </h5>
+                    {differences.filter(d => d.type === 'modified').map((diff, idx) => (
+                      <div 
+                        key={idx}
+                        style={{
+                          padding: '10px',
+                          backgroundColor: '#fff3cd',
+                          border: '1px solid #ffeeba',
+                          borderRadius: '4px',
+                          marginBottom: '8px',
+                          fontSize: '12px'
+                        }}
+                      >
+                        <div style={{ marginBottom: '5px' }}>
+                          <strong>Блок:</strong> {diff.blockId}
+                        </div>
+                        <div style={{ display: 'flex', gap: '20px' }}>
+                          <div>
+                            <strong style={{ color: '#dc3545' }}>{diff.property}:</strong>
+                            <div style={{ fontFamily: 'monospace', color: '#dc3545' }}>
+                              {String(diff.oldValue).substring(0, 50)}...
+                            </div>
+                          </div>
+                          <div>
+                            <strong style={{ color: '#28a745' }}>→</strong>
+                            <div style={{ fontFamily: 'monospace', color: '#28a745' }}>
+                              {String(diff.newValue).substring(0, 50)}...
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div style={{ 
       position: 'fixed',
@@ -1229,7 +1775,6 @@ function WorkflowViewer() {
       padding: '10px',
       boxSizing: 'border-box'
     }}>
-      {/* Верхняя панель управления */}
       <div style={{
         display: 'flex',
         justifyContent: 'space-between',
@@ -1245,6 +1790,11 @@ function WorkflowViewer() {
           <span style={{ marginLeft: '15px', fontSize: '13px', color: '#666' }}>
             ({areas.length} из 2 областей активно)
           </span>
+          {compareData && (
+            <span style={{ marginLeft: '15px', fontSize: '13px', color: '#6f42c1' }}>
+              🔍 Доступно сравнение
+            </span>
+          )}
         </div>
         <div style={{ display: 'flex', gap: '10px' }}>
           {areas.length < 2 && (
@@ -1267,10 +1817,32 @@ function WorkflowViewer() {
               + Добавить схему
             </button>
           )}
+          {compareData && (
+            <button 
+              onClick={() => setShowCompareView(true)}
+              style={{
+                padding: '10px 20px',
+                backgroundColor: '#6f42c1',
+                color: 'white',
+                border: 'none',
+                borderRadius: '6px',
+                cursor: 'pointer',
+                fontSize: '14px',
+                fontWeight: '500',
+                transition: 'background-color 0.2s'
+              }}
+              onMouseOver={(e) => e.target.style.backgroundColor = '#5a32a3'}
+              onMouseOut={(e) => e.target.style.backgroundColor = '#6f42c1'}
+            >
+              🔍 Показать сравнение
+            </button>
+          )}
           <button 
             onClick={() => {
               setAreas([{ id: 1, title: 'Схема 1', active: true }]);
               setActiveAreaId(1);
+              setCompareData(null);
+              setShowCompareView(false);
             }}
             style={{
               padding: '10px 20px',
@@ -1291,7 +1863,6 @@ function WorkflowViewer() {
         </div>
       </div>
 
-      {/* Рабочие области */}
       <div style={{
         display: 'flex',
         gap: '10px',
@@ -1314,12 +1885,14 @@ function WorkflowViewer() {
               onClose={() => removeArea(area.id)}
               isActive={area.active}
               onActivate={activateArea}
+              onCompare={handleCompare}
             />
           </div>
         ))}
       </div>
 
-      {/* CSS стили */}
+      {showCompareView && <CompareView />}
+
       <style>{`
         .workflow-node {
           transition: outline 0.15s ease-in-out, border-color 0.15s ease-in-out;
