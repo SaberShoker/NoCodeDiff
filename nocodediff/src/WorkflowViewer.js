@@ -18,7 +18,15 @@ function WorkflowArea({
   onClose, 
   isActive,
   onActivate,
-  onCompare
+  onCompare,
+  sharedGitConfig,
+  setSharedGitConfig,
+  sharedGitFiles,
+  setSharedGitFiles,
+  sharedSelectedGitFile,
+  setSharedSelectedGitFile,
+  sharedGitCommits,
+  setSharedGitCommits
 }) {
   const [jsonData, setJsonData] = useState(null);
   const [error, setError] = useState(null);
@@ -34,16 +42,15 @@ function WorkflowArea({
   // 🔧 Активная вкладка в панели информации
   const [activeInfoTab, setActiveInfoTab] = useState('general');
   
-  // 🔧 Git состояние
-  const [gitConfig, setGitConfig] = useState({
-    provider: 'github',
-    repository: '',
-    branch: 'main',
-    token: ''
-  });
-  const [gitFiles, setGitFiles] = useState([]);
-  const [selectedGitFile, setSelectedGitFile] = useState(null);
-  const [gitCommits, setGitCommits] = useState([]);
+  // 🔧 Git состояние - используем синхронизированное из родителя
+  const gitConfig = sharedGitConfig;
+  const setGitConfig = setSharedGitConfig;
+  const gitFiles = sharedGitFiles;
+  const setGitFiles = setSharedGitFiles;
+  const selectedGitFile = sharedSelectedGitFile;
+  const setSelectedGitFile = setSharedSelectedGitFile;
+  const gitCommits = sharedGitCommits;
+  const setGitCommits = setSharedGitCommits;
   const [selectedCommit, setSelectedCommit] = useState(null);
   const [compareMode, setCompareMode] = useState(false);
   const [compareData, setCompareData] = useState({ old: null, new: null });
@@ -154,7 +161,7 @@ function WorkflowArea({
     } finally {
       setIsLoadingGit(false);
     }
-  }, [gitConfig]);
+  }, [gitConfig, setGitFiles]);
 
   // 🔧 Загрузка содержимого файла из Git
   const loadGitFileContent = useCallback(async (file) => {
@@ -171,7 +178,7 @@ function WorkflowArea({
     } finally {
       setIsLoadingGit(false);
     }
-  }, []);
+  }, [setSelectedGitFile, parseWorkflowData]);
 
   // 🔧 Загрузка коммитов для сравнения
   const loadGitCommits = useCallback(async () => {
@@ -204,7 +211,7 @@ function WorkflowArea({
     } finally {
       setIsLoadingGit(false);
     }
-  }, [gitConfig, selectedGitFile]);
+  }, [gitConfig, selectedGitFile, setGitCommits]);
 
   // 🔧 Загрузка версии файла по коммиту
   const loadCommitVersion = useCallback(async (commit, versionType) => {
@@ -238,7 +245,7 @@ function WorkflowArea({
     } finally {
       setIsLoadingGit(false);
     }
-  }, [gitConfig, selectedGitFile]);
+  }, [gitConfig, selectedGitFile, setCompareData]);
 
   // 🔧 Выполнение сравнения двух версий
   const executeCompare = useCallback(() => {
@@ -1497,6 +1504,17 @@ function WorkflowViewer() {
   const [activeAreaId, setActiveAreaId] = useState(1);
   const [compareData, setCompareData] = useState(null);
   const [showCompareView, setShowCompareView] = useState(false);
+  
+  // 🔧 Синхронизированное Git состояние между всеми окнами
+  const [sharedGitConfig, setSharedGitConfig] = useState({
+    provider: 'github',
+    repository: '',
+    branch: 'main',
+    token: ''
+  });
+  const [sharedGitFiles, setSharedGitFiles] = useState([]);
+  const [sharedSelectedGitFile, setSharedSelectedGitFile] = useState(null);
+  const [sharedGitCommits, setSharedGitCommits] = useState([]);
 
   const addArea = () => {
     if (areas.length >= 2) return;
@@ -1886,6 +1904,14 @@ function WorkflowViewer() {
               isActive={area.active}
               onActivate={activateArea}
               onCompare={handleCompare}
+              sharedGitConfig={sharedGitConfig}
+              setSharedGitConfig={setSharedGitConfig}
+              sharedGitFiles={sharedGitFiles}
+              setSharedGitFiles={setSharedGitFiles}
+              sharedSelectedGitFile={sharedSelectedGitFile}
+              setSharedSelectedGitFile={setSharedSelectedGitFile}
+              sharedGitCommits={sharedGitCommits}
+              setSharedGitCommits={setSharedGitCommits}
             />
           </div>
         ))}
