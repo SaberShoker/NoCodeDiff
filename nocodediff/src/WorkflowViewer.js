@@ -61,6 +61,62 @@ function WorkflowArea({
     return Math.round(value / SNAP_GRID_SIZE) * SNAP_GRID_SIZE;
   }, []);
 
+  const parseWorkflowData = useCallback((json) => {
+    if (!json?.Scheme?.RouteScheme?.Layout) {
+      return;
+    }
+
+    const routeScheme = json.Scheme.RouteScheme;
+    const layout = routeScheme.Layout;
+    const blocksCollection = routeScheme.Blocks?.$values || [];
+    const edgesCollection = routeScheme.Edges?.$values || [];
+    const blocksLayout = layout.BlocksLayout?.$values || [];
+
+    setBlocksCollection(blocksCollection);
+
+    const parsedNodes = blocksLayout.map(blockLayout => {
+      const blockId = blockLayout.BlockId;
+      const fullBlock = blocksCollection.find(b => b.Id === blockId);
+      const blockType = getBlockType(fullBlock);
+      
+      return {
+        id: blockId,
+        position: { 
+            x: snapToGrid(blockLayout.Bounds.X),
+            y: snapToGrid(blockLayout.Bounds.Y)
+        },
+        data: { 
+            label: fullBlock?.Title || blockId,
+            blockType: blockType,
+            fullBlock: fullBlock
+        },
+        style: getBlockStyle(blockType, false),
+        draggable: true,
+        className: 'workflow-node'
+      };
+    });
+
+    const parsedEdges = edgesCollection.map(edge => ({
+      id: `edge-${edge.Id}`,
+      source: edge.Source,
+      target: edge.Target,
+      label: edge.Value || '',
+      type: 'smoothstep',
+      animated: false,
+      style: { stroke: '#555', strokeWidth: 2 },
+      markerEnd: {
+        type: 'arrowclosed',
+        color: '#555'
+      },
+      data: {
+        edgeValue: edge.Value
+      }
+    }));
+
+    setNodes(parsedNodes);
+    setEdges(parsedEdges);
+  }, [setNodes, setEdges, snapToGrid]);
+
   const handleFileUpload = (event) => {
     const file = event.target.files[0];
     if (!file) return;
@@ -273,62 +329,6 @@ function WorkflowArea({
     setCompareMode(false);
     setCompareData({ old: null, new: null });
   };
-
-  const parseWorkflowData = useCallback((json) => {
-    if (!json?.Scheme?.RouteScheme?.Layout) {
-      return;
-    }
-
-    const routeScheme = json.Scheme.RouteScheme;
-    const layout = routeScheme.Layout;
-    const blocksCollection = routeScheme.Blocks?.$values || [];
-    const edgesCollection = routeScheme.Edges?.$values || [];
-    const blocksLayout = layout.BlocksLayout?.$values || [];
-
-    setBlocksCollection(blocksCollection);
-
-    const parsedNodes = blocksLayout.map(blockLayout => {
-      const blockId = blockLayout.BlockId;
-      const fullBlock = blocksCollection.find(b => b.Id === blockId);
-      const blockType = getBlockType(fullBlock);
-      
-      return {
-        id: blockId,
-        position: { 
-            x: snapToGrid(blockLayout.Bounds.X),
-            y: snapToGrid(blockLayout.Bounds.Y)
-        },
-        data: { 
-            label: fullBlock?.Title || blockId,
-            blockType: blockType,
-            fullBlock: fullBlock
-        },
-        style: getBlockStyle(blockType, false),
-        draggable: true,
-        className: 'workflow-node'
-      };
-    });
-
-    const parsedEdges = edgesCollection.map(edge => ({
-      id: `edge-${edge.Id}`,
-      source: edge.Source,
-      target: edge.Target,
-      label: edge.Value || '',
-      type: 'smoothstep',
-      animated: false,
-      style: { stroke: '#555', strokeWidth: 2 },
-      markerEnd: {
-        type: 'arrowclosed',
-        color: '#555'
-      },
-      data: {
-        edgeValue: edge.Value
-      }
-    }));
-
-    setNodes(parsedNodes);
-    setEdges(parsedEdges);
-  }, [setNodes, setEdges, snapToGrid]);
 
   useEffect(() => {
     if (nodes.length > 0 && isInitialLoad) {
