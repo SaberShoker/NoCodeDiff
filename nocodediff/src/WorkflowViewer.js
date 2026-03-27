@@ -42,6 +42,12 @@ function WorkflowArea({
   // 🔧 Активная вкладка в панели информации
   const [activeInfoTab, setActiveInfoTab] = useState('general');
   
+  // 🔧 Режим просмотра: 'main' - главная страница схемы, 'visual' - визуальная схема
+  const [viewMode, setViewMode] = useState('main');
+  
+  // 🔧 Данные главной страницы схемы
+  const [schemeMainData, setSchemeMainData] = useState(null);
+  
   // 🔧 Git состояние - используем синхронизированное из родителя
   const gitConfig = sharedGitConfig;
   const setGitConfig = setSharedGitConfig;
@@ -71,6 +77,18 @@ function WorkflowArea({
     const blocksCollection = routeScheme.Blocks?.$values || [];
     const edgesCollection = routeScheme.Edges?.$values || [];
     const blocksLayout = layout.BlocksLayout?.$values || [];
+
+    // Извлекаем данные для главной страницы схемы
+    const schemeData = {
+      criteria: routeScheme.Criteria || 'Не указано',
+      priority: routeScheme.Priority !== undefined ? routeScheme.Priority : 'Не указано',
+      parameters: routeScheme.Parameters?.$values || [],
+      showProcessStages: routeScheme.ShowProcessStages !== undefined ? routeScheme.ShowProcessStages : false,
+      moduleNameGuid: routeScheme.ModuleNameGuid || 'Не указано',
+      storeAsDefaultSetting: routeScheme.StoreAsDefaultSetting !== undefined ? routeScheme.StoreAsDefaultSetting : false,
+      status: routeScheme.Status || 'Не указано'
+    };
+    setSchemeMainData(schemeData);
 
     setBlocksCollection(blocksCollection);
 
@@ -369,6 +387,8 @@ function WorkflowArea({
     setActiveInfoTab('general');
     setCompareMode(false);
     setCompareData({ old: null, new: null });
+    setViewMode('main');
+    setSchemeMainData(null);
   };
 
   useEffect(() => {
@@ -888,6 +908,167 @@ function WorkflowArea({
       </div>
     );
   }
+  }
+  
+  // Главная страница схемы с информацией о разделах
+  if (jsonData && schemeMainData && viewMode === 'main') {
+    return (
+      <div style={{ 
+        display: 'flex',
+        flexDirection: 'column',
+        width: '100%',
+        height: '100%',
+        backgroundColor: '#f5f5f5',
+        padding: '20px',
+        boxSizing: 'border-box',
+        border: isActive ? '3px solid #007bff' : '3px solid transparent',
+        borderRadius: '12px',
+        position: 'relative',
+        overflow: 'auto'
+      }}>
+        <button 
+          onClick={onClose}
+          style={{
+            position: 'absolute',
+            top: '10px',
+            right: '10px',
+            padding: '6px 12px',
+            backgroundColor: '#dc3545',
+            color: 'white',
+            border: 'none',
+            borderRadius: '6px',
+            cursor: 'pointer',
+            fontSize: '12px',
+            fontWeight: '500',
+            zIndex: 1001
+          }}
+        >
+          ✕ Закрыть
+        </button>
+
+        <div style={{ 
+          padding: '30px', 
+          backgroundColor: 'white',
+          borderRadius: '12px',
+          boxShadow: '0 2px 10px rgba(0,0,0,0.1)',
+          maxWidth: '900px',
+          width: '100%',
+          margin: '0 auto'
+        }}>
+          <h2 style={{ marginBottom: '20px', color: '#333', borderBottom: '2px solid #007bff', paddingBottom: '10px' }}>
+            📋 Информация о схеме
+          </h2>
+          
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '15px', marginBottom: '25px' }}>
+            <div style={{ padding: '15px', backgroundColor: '#f8f9fa', borderRadius: '8px', border: '1px solid #e0e0e0' }}>
+              <strong style={{ color: '#007bff', display: 'block', marginBottom: '8px', fontSize: '13px' }}>🎯 Criteria</strong>
+              <span style={{ color: '#333', fontSize: '14px' }}>{schemeMainData.criteria}</span>
+            </div>
+            
+            <div style={{ padding: '15px', backgroundColor: '#f8f9fa', borderRadius: '8px', border: '1px solid #e0e0e0' }}>
+              <strong style={{ color: '#007bff', display: 'block', marginBottom: '8px', fontSize: '13px' }}>⚡ Priority</strong>
+              <span style={{ color: '#333', fontSize: '14px' }}>{schemeMainData.priority}</span>
+            </div>
+            
+            <div style={{ padding: '15px', backgroundColor: '#f8f9fa', borderRadius: '8px', border: '1px solid #e0e0e0' }}>
+              <strong style={{ color: '#007bff', display: 'block', marginBottom: '8px', fontSize: '13px' }}>🔧 ModuleNameGuid</strong>
+              <span style={{ color: '#333', fontSize: '12px', fontFamily: 'monospace', wordBreak: 'break-all' }}>{schemeMainData.moduleNameGuid}</span>
+            </div>
+            
+            <div style={{ padding: '15px', backgroundColor: '#f8f9fa', borderRadius: '8px', border: '1px solid #e0e0e0' }}>
+              <strong style={{ color: '#007bff', display: 'block', marginBottom: '8px', fontSize: '13px' }}>📊 Status</strong>
+              <span style={{ color: '#333', fontSize: '14px' }}>{schemeMainData.status}</span>
+            </div>
+            
+            <div style={{ padding: '15px', backgroundColor: '#f8f9fa', borderRadius: '8px', border: '1px solid #e0e0e0' }}>
+              <strong style={{ color: '#007bff', display: 'block', marginBottom: '8px', fontSize: '13px' }}>👁️ ShowProcessStages</strong>
+              <span style={{ color: schemeMainData.showProcessStages ? '#28a745' : '#666', fontSize: '14px' }}>
+                {schemeMainData.showProcessStages ? '✓ Да' : '✗ Нет'}
+              </span>
+            </div>
+            
+            <div style={{ padding: '15px', backgroundColor: '#f8f9fa', borderRadius: '8px', border: '1px solid #e0e0e0' }}>
+              <strong style={{ color: '#007bff', display: 'block', marginBottom: '8px', fontSize: '13px' }}>💾 StoreAsDefaultSetting</strong>
+              <span style={{ color: schemeMainData.storeAsDefaultSetting ? '#28a745' : '#666', fontSize: '14px' }}>
+                {schemeMainData.storeAsDefaultSetting ? '✓ Да' : '✗ Нет'}
+              </span>
+            </div>
+          </div>
+          
+          <div style={{ marginBottom: '25px' }}>
+            <h3 style={{ color: '#333', marginBottom: '10px', fontSize: '16px' }}>📊 Parameters ({schemeMainData.parameters.length})</h3>
+            {schemeMainData.parameters.length > 0 ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                {schemeMainData.parameters.map((param, idx) => (
+                  <div key={idx} style={{ padding: '10px', backgroundColor: '#f8f9fa', borderRadius: '6px', border: '1px solid #e0e0e0' }}>
+                    <div style={{ fontSize: '12px', marginBottom: '4px' }}>
+                      <strong>ID:</strong> <span style={{ color: '#007bff', fontFamily: 'monospace' }}>{param.Id || 'N/A'}</span>
+                    </div>
+                    {param.Name && (
+                      <div style={{ fontSize: '12px', marginBottom: '4px' }}>
+                        <strong>Имя:</strong> <span style={{ color: '#333' }}>{param.Name}</span>
+                      </div>
+                    )}
+                    {param.Type && (
+                      <div style={{ fontSize: '12px' }}>
+                        <strong>Тип:</strong> <span style={{ color: '#6f42c1' }}>{param.Type}</span>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p style={{ color: '#999', fontSize: '13px', padding: '15px', backgroundColor: '#f8f9fa', borderRadius: '6px' }}>
+                Параметры не указаны
+              </p>
+            )}
+          </div>
+          
+          <div style={{ display: 'flex', gap: '10px', justifyContent: 'center', marginTop: '30px' }}>
+            <button 
+              onClick={() => setViewMode('visual')}
+              style={{ 
+                padding: '12px 24px',
+                backgroundColor: '#007bff',
+                color: 'white',
+                border: 'none',
+                borderRadius: '8px',
+                cursor: 'pointer',
+                fontSize: '14px',
+                fontWeight: '600',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                transition: 'background-color 0.2s'
+              }}
+              onMouseOver={(e) => e.target.style.backgroundColor = '#0056b3'}
+              onMouseOut={(e) => e.target.style.backgroundColor = '#007bff'}
+            >
+              🔍 Перейти к визуальной схеме
+            </button>
+            <button 
+              onClick={handleReset}
+              style={{ 
+                padding: '12px 24px',
+                backgroundColor: '#6c757d',
+                color: 'white',
+                border: 'none',
+                borderRadius: '8px',
+                cursor: 'pointer',
+                fontSize: '14px',
+                fontWeight: '600',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px'
+              }}
+            >
+              📁 Новый файл
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (!jsonData?.Scheme?.RouteScheme?.Layout?.BlocksLayout) {
     return (
@@ -974,7 +1155,10 @@ function WorkflowArea({
         boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
         fontSize: '13px',
         fontWeight: '600',
-        pointerEvents: 'none'
+        pointerEvents: 'auto',
+        display: 'flex',
+        gap: '15px',
+        alignItems: 'center'
       }}>
         <span style={{ color: '#007bff' }}>{title}</span>
         <span style={{ marginLeft: '15px', color: '#666' }}>
@@ -995,6 +1179,22 @@ function WorkflowArea({
             Выбран: {selectedNodeId}
           </span>
         )}
+        <button
+          onClick={() => setViewMode('main')}
+          style={{
+            marginLeft: 'auto',
+            padding: '6px 12px',
+            backgroundColor: '#28a745',
+            color: 'white',
+            border: 'none',
+            borderRadius: '6px',
+            cursor: 'pointer',
+            fontSize: '12px',
+            fontWeight: '500'
+          }}
+        >
+          📋 Главная страница
+        </button>
       </div>
 
       <button 
