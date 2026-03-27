@@ -142,6 +142,39 @@ function WorkflowArea({
     reader.readAsText(file);
   };
 
+  // 🔧 Рекурсивная загрузка файлов из Git
+  const loadGitFilesRecursive = useCallback(async (owner, repo, path = '', branch) => {
+    const response = await fetch(
+      `https://api.github.com/repos/${owner}/${repo}/contents${path ? '/' + path : ''}?ref=${branch}`,
+      {
+        headers: {
+          'Authorization': `token ${gitConfig.token}`,
+          'Accept': 'application/vnd.github.v3+json',
+          'User-Agent': 'WorkflowViewer-App/1.0'
+        }
+      }
+    );
+
+    if (!response.ok) {
+      return [];
+    }
+
+    const items = await response.json();
+    let jsonFiles = [];
+
+    for (const item of items) {
+      if (item.type === 'dir') {
+        // Рекурсивно загружаем содержимое папки
+        const subFolderFiles = await loadGitFilesRecursive(owner, repo, item.path, branch);
+        jsonFiles = jsonFiles.concat(subFolderFiles);
+      } else if (item.name.endsWith('.json')) {
+        jsonFiles.push(item);
+      }
+    }
+
+    return jsonFiles;
+  }, [gitConfig]);
+
   // 🔧 Загрузка файлов из Git
   const loadGitFiles = useCallback(async () => {
     console.log('🔍 Загрузка файлов из Git...', gitConfig);
@@ -167,45 +200,10 @@ function WorkflowArea({
       
       console.log(`📡 Запрос к GitHub API: ${owner}/${repo}@${gitConfig.branch}`);
       
-      // 🔧 Добавлен User-Agent и правильные заголовки
-      const response = await fetch(
-        `https://api.github.com/repos/${owner}/${repo}/contents?ref=${gitConfig.branch}`,
-        {
-          headers: {
-            'Authorization': `token ${gitConfig.token}`,
-            'Accept': 'application/vnd.github.v3+json',
-            'User-Agent': 'WorkflowViewer-App/1.0'
-          }
-        }
-      );
-
-      console.log('📥 Ответ GitHub:', response.status, response.statusText);
+      // 🔧 Рекурсивная загрузка всех JSON файлов из репозитория
+      const jsonFiles = await loadGitFilesRecursive(owner, repo, '', gitConfig.branch);
       
-      // 🔧 Обработка 403 ошибки
-      if (response.status === 403) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(
-          `403 Forbidden: ${errorData.message || 'Проверьте токен и права доступа'}`
-        );
-      }
-      
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(
-          `GitHub API error ${response.status}: ${errorData.message || response.statusText}`
-        );
-      }
-
-      const files = await response.json();
-      console.log('📁 Найдено файлов:', files.length);
-      
-      const jsonFiles = files.filter(f => {
-        const isJson = f.name.endsWith('.json');
-        console.log(`  - ${f.name} (${f.type}) ${isJson ? '✓' : '✗'}`);
-        return isJson;
-      });
-      
-      console.log('✅ JSON файлов:', jsonFiles.length);
+      console.log('✅ Найдено JSON файлов:', jsonFiles.length);
       setGitFiles(jsonFiles);
       
       if (jsonFiles.length === 0) {
@@ -217,7 +215,7 @@ function WorkflowArea({
     } finally {
       setIsLoadingGit(false);
     }
-  }, [gitConfig, setGitFiles]);
+  }, [gitConfig, setGitFiles, loadGitFilesRecursive]);
 
   // 🔧 Загрузка содержимого файла из Git
   const loadGitFileContent = useCallback(async (file) => {
@@ -705,7 +703,7 @@ function WorkflowArea({
                   {gitFiles.map(file => (
                     <div 
                       key={file.path}
-                      onClick={() => loadGitFileContent(file)}
+                      onClick={() => setSelectedGitFile(file)}
                       style={{
                         padding: '8px 12px',
                         borderBottom: '1px solid #eee',
@@ -717,7 +715,7 @@ function WorkflowArea({
                         alignItems: 'center'
                       }}
                     >
-                      <span>📄 {file.name}</span>
+                      <span>📄 {file.path}</span>
                       {selectedGitFile?.path === file.path && (
                         <span style={{ color: '#28a745', fontSize: '11px' }}>✓ Выбран</span>
                       )}
@@ -728,6 +726,22 @@ function WorkflowArea({
               
               {selectedGitFile && (
                 <div style={{ marginTop: '15px', paddingTop: '15px', borderTop: '1px solid #ddd' }}>
+                  <button 
+                    onClick={() => loadGitFileContent(selectedGitFile)}
+                    disabled={isLoadingGit}
+                    style={{ 
+                      padding: '8px 16px', 
+                      backgroundColor: '#28a745', 
+                      color: 'white', 
+                      border: 'none', 
+                      borderRadius: '4px',
+                      cursor: isLoadingGit ? 'not-allowed' : 'pointer',
+                      fontSize: '13px',
+                      marginRight: '10px'
+                    }}
+                  >
+                    📂 Открыть файл
+                  </button>
                   <button 
                     onClick={loadGitCommits}
                     disabled={isLoadingGit}

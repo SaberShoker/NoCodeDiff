@@ -1,1 +1,1 @@
-Nothing should be ignored since the changes only include a source code file (.js) and no build artifacts, dependencies, or temp files.
+Nothing should be ignored based on the provided file changes. The only modified file is a source code file (WorkflowViewer.js), which should not be added to .gitignore.
