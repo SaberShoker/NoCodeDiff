@@ -8,7 +8,17 @@ import ReactFlow, {
 } from 'reactflow';
 import 'reactflow/dist/style.css';
 
-function WorkflowViewer() {
+// 🔧 Настройки сетки привязки
+const SNAP_GRID_SIZE = 10;
+
+// Компонент одной рабочей области
+function WorkflowArea({ 
+  areaId, 
+  title, 
+  onClose, 
+  isActive,
+  onActivate 
+}) {
   const [jsonData, setJsonData] = useState(null);
   const [error, setError] = useState(null);
   const [selectedNodeId, setSelectedNodeId] = useState(null);
@@ -17,8 +27,10 @@ function WorkflowViewer() {
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [isInitialLoad, setIsInitialLoad] = useState(true);
 
-  // 🔧 Настройки сетки привязки
-  const SNAP_GRID_SIZE = 10; // Размер ячейки сетки (чем меньше, тем точнее)
+  // Функция округления координат до сетки
+  const snapToGrid = useCallback((value) => {
+    return Math.round(value / SNAP_GRID_SIZE) * SNAP_GRID_SIZE;
+  }, []);
 
   const handleFileUpload = (event) => {
     const file = event.target.files[0];
@@ -55,11 +67,6 @@ function WorkflowViewer() {
     setIsInitialLoad(true);
   };
 
-  // 🔧 Функция округления координат до сетки
-  const snapToGrid = useCallback((value) => {
-    return Math.round(value / SNAP_GRID_SIZE) * SNAP_GRID_SIZE;
-  }, []);
-
   const parseWorkflowData = useCallback((json) => {
     if (!json?.Scheme?.RouteScheme?.Layout) {
       return;
@@ -71,7 +78,6 @@ function WorkflowViewer() {
     const edgesCollection = routeScheme.Edges?.$values || [];
     const blocksLayout = layout.BlocksLayout?.$values || [];
 
-    // Парсим блоки из BlocksLayout с заголовками из Blocks
     const parsedNodes = blocksLayout.map(blockLayout => {
       const blockId = blockLayout.BlockId;
       const fullBlock = blocksCollection.find(b => b.Id === blockId);
@@ -80,7 +86,7 @@ function WorkflowViewer() {
       return {
         id: blockId,
         position: { 
-          x: snapToGrid(blockLayout.Bounds.X), // 🔧 Округляем начальные координаты
+          x: snapToGrid(blockLayout.Bounds.X),
           y: snapToGrid(blockLayout.Bounds.Y)
         },
         data: { 
@@ -93,7 +99,6 @@ function WorkflowViewer() {
       };
     });
 
-    // Парсим края из Edges
     const parsedEdges = edgesCollection.map(edge => ({
       id: `edge-${edge.Id}`,
       source: edge.Source,
@@ -115,7 +120,6 @@ function WorkflowViewer() {
     setEdges(parsedEdges);
   }, [setNodes, setEdges, snapToGrid]);
 
-  // После загрузки данных — применяем fitView только один раз
   useEffect(() => {
     if (nodes.length > 0 && isInitialLoad) {
       const timer = setTimeout(() => {
@@ -125,19 +129,12 @@ function WorkflowViewer() {
     }
   }, [nodes.length, isInitialLoad]);
 
-  // 🔧 Обработчик окончания перетаскивания с точной привязкой
   const onNodeDragStop = useCallback((event, node) => {
     const snappedPosition = {
       x: snapToGrid(node.position.x),
       y: snapToGrid(node.position.y)
     };
 
-    console.log(`Блок ${node.id} перемещён:`, {
-      от: node.position,
-      до: snappedPosition
-    });
-
-    // 🔧 Принудительно устанавливаем позицию по сетке
     setNodes(nds => nds.map(n => {
       if (n.id === node.id) {
         return {
@@ -149,8 +146,8 @@ function WorkflowViewer() {
     }));
   }, [setNodes, snapToGrid]);
 
-  // Обработчик клика на узел — только выделение, без сдвига
   const onNodeClick = useCallback((event, node) => {
+    onActivate(areaId);
     setSelectedNodeId(node.id);
     setSelectedEdgeId(null);
     
@@ -176,10 +173,10 @@ function WorkflowViewer() {
         };
       }
     }));
-  }, [setNodes]);
+  }, [setNodes, areaId, onActivate]);
 
-  // Обработчик клика на край
   const onEdgeClick = useCallback((event, edge) => {
+    onActivate(areaId);
     setSelectedEdgeId(edge.id);
     setSelectedNodeId(null);
     
@@ -210,10 +207,10 @@ function WorkflowViewer() {
         };
       }
     }));
-  }, [setEdges]);
+  }, [setEdges, areaId, onActivate]);
 
-  // Обработчик клика на пустое пространство
   const onPaneClick = useCallback(() => {
+    onActivate(areaId);
     setSelectedNodeId(null);
     setSelectedEdgeId(null);
     
@@ -235,9 +232,8 @@ function WorkflowViewer() {
         color: '#555'
       }
     })));
-  }, [setNodes, setEdges]);
+  }, [setNodes, setEdges, areaId, onActivate]);
 
-  // Вспомогательные функции
   function getBlockType(block) {
     if (!block) return 'unknown';
     
@@ -290,12 +286,36 @@ function WorkflowViewer() {
         flexDirection: 'column',
         alignItems: 'center',
         justifyContent: 'center',
-        minHeight: '100vh',
-        width: '100vw',
+        width: '100%',
+        height: '100%',
         backgroundColor: '#f5f5f5',
         padding: '20px',
-        boxSizing: 'border-box'
+        boxSizing: 'border-box',
+        border: isActive ? '3px solid #007bff' : '3px solid transparent',
+        borderRadius: '12px',
+        position: 'relative'
       }}>
+        {/* Кнопка закрытия области */}
+        <button 
+          onClick={onClose}
+          style={{
+            position: 'absolute',
+            top: '10px',
+            right: '10px',
+            padding: '6px 12px',
+            backgroundColor: '#dc3545',
+            color: 'white',
+            border: 'none',
+            borderRadius: '6px',
+            cursor: 'pointer',
+            fontSize: '12px',
+            fontWeight: '500',
+            zIndex: 1001
+          }}
+        >
+          ✕ Закрыть
+        </button>
+
         <div style={{ 
           padding: '40px', 
           textAlign: 'center',
@@ -303,14 +323,14 @@ function WorkflowViewer() {
           borderRadius: '12px',
           backgroundColor: 'white',
           boxShadow: '0 2px 10px rgba(0,0,0,0.1)',
-          maxWidth: '500px',
+          maxWidth: '400px',
           width: '100%'
         }}>
-          <h2 style={{ marginBottom: '20px', color: '#333' }}>
-            Загрузите JSON файл со схемой маршрута (Sungero)
-          </h2>
-          <p style={{ color: '#666', fontSize: '14px', marginBottom: '20px' }}>
-            Файл должен содержать структуру: Scheme.RouteScheme с Blocks и Edges
+          <h3 style={{ marginBottom: '15px', color: '#333' }}>
+            {title}
+          </h3>
+          <p style={{ color: '#666', fontSize: '13px', marginBottom: '20px' }}>
+            Загрузите JSON файл со схемой маршрута
           </p>
           <input 
             type="file" 
@@ -326,7 +346,7 @@ function WorkflowViewer() {
             }}
           />
           {error && (
-            <p style={{ color: 'red', marginTop: '15px', fontSize: '14px' }}>{error}</p>
+            <p style={{ color: 'red', marginTop: '15px', fontSize: '13px' }}>{error}</p>
           )}
         </div>
       </div>
@@ -340,32 +360,54 @@ function WorkflowViewer() {
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        minHeight: '100vh',
-        width: '100vw',
-        backgroundColor: '#f5f5f5'
+        width: '100%',
+        height: '100%',
+        backgroundColor: '#f5f5f5',
+        padding: '20px',
+        boxSizing: 'border-box',
+        border: isActive ? '3px solid #007bff' : '3px solid transparent',
+        borderRadius: '12px',
+        position: 'relative'
       }}>
+        <button 
+          onClick={onClose}
+          style={{
+            position: 'absolute',
+            top: '10px',
+            right: '10px',
+            padding: '6px 12px',
+            backgroundColor: '#dc3545',
+            color: 'white',
+            border: 'none',
+            borderRadius: '6px',
+            cursor: 'pointer',
+            fontSize: '12px',
+            fontWeight: '500',
+            zIndex: 1001
+          }}
+        >
+          ✕ Закрыть
+        </button>
+
         <div style={{ 
-          padding: '40px', 
+          padding: '30px', 
           textAlign: 'center',
           backgroundColor: 'white',
           borderRadius: '12px',
           boxShadow: '0 2px 10px rgba(0,0,0,0.1)',
-          maxWidth: '500px'
+          maxWidth: '400px'
         }}>
-          <p style={{ color: 'red', marginBottom: '20px' }}>Неверная структура JSON файла</p>
-          <p style={{ color: '#666', marginBottom: '20px' }}>
-            Ожидаемая структура: Scheme.RouteScheme.Layout с BlocksLayout и EdgesLayout
-          </p>
+          <p style={{ color: 'red', marginBottom: '15px' }}>Неверная структура JSON</p>
           <button 
             onClick={handleReset} 
             style={{ 
-              padding: '12px 24px',
+              padding: '10px 20px',
               backgroundColor: '#007bff',
               color: 'white',
               border: 'none',
               borderRadius: '6px',
               cursor: 'pointer',
-              fontSize: '14px'
+              fontSize: '13px'
             }}
           >
             Загрузить другой файл
@@ -375,56 +417,22 @@ function WorkflowViewer() {
     );
   }
 
-  // Полноэкранное отображение схемы
+  // Отображение схемы
   return (
     <div style={{ 
-      position: 'fixed',
-      top: 0,
-      left: 0,
-      width: '100vw',
-      height: '100vh',
+      width: '100%',
+      height: '100%',
+      position: 'relative',
+      border: isActive ? '3px solid #007bff' : '3px solid transparent',
+      borderRadius: '12px',
       overflow: 'hidden',
-      backgroundColor: '#fff'
+      boxSizing: 'border-box'
     }}>
-      {/* Панель статистики */}
+      {/* Заголовок области */}
       <div style={{
         position: 'absolute',
-        top: '15px',
-        left: '15px',
-        zIndex: 1000,
-        backgroundColor: 'rgba(255,255,255,0.95)',
-        padding: '12px 20px',
-        borderRadius: '8px',
-        border: '1px solid #ddd',
-        boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
-        fontSize: '14px',
-        fontWeight: '500',
-        pointerEvents: 'none'
-      }}>
-        <span style={{ marginRight: '15px' }}>
-          <strong style={{ color: '#007bff' }}>{nodes.length}</strong> блоков
-        </span>
-        <span style={{ marginRight: '15px' }}>
-          <strong style={{ color: '#28a745' }}>{edges.length}</strong> связей
-        </span>
-        {selectedNodeId && (
-          <span style={{ color: '#dc3545' }}>
-            <strong>Выбран блок:</strong> {selectedNodeId}
-          </span>
-        )}
-        {selectedEdgeId && (
-          <span style={{ color: '#28a745' }}>
-            <strong>Выбрана связь:</strong> {selectedEdgeId.replace('edge-', '')}
-          </span>
-        )}
-      </div>
-
-      {/* 🔧 Панель настроек сетки */}
-      <div style={{
-        position: 'absolute',
-        top: '15px',
-        left: '50%',
-        transform: 'translateX(-50%)',
+        top: '10px',
+        left: '10px',
         zIndex: 1000,
         backgroundColor: 'rgba(255,255,255,0.95)',
         padding: '8px 16px',
@@ -432,10 +440,18 @@ function WorkflowViewer() {
         border: '1px solid #ddd',
         boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
         fontSize: '13px',
-        fontWeight: '500',
+        fontWeight: '600',
         pointerEvents: 'none'
       }}>
-        📐 Шаг сетки: <strong style={{ color: '#007bff' }}>{SNAP_GRID_SIZE}px</strong>
+        <span style={{ color: '#007bff' }}>{title}</span>
+        <span style={{ marginLeft: '15px', color: '#666' }}>
+          {nodes.length} блоков • {edges.length} связей
+        </span>
+        {selectedNodeId && (
+          <span style={{ marginLeft: '15px', color: '#dc3545' }}>
+            Выбран: {selectedNodeId}
+          </span>
+        )}
       </div>
 
       {/* Кнопка сброса */}
@@ -443,117 +459,57 @@ function WorkflowViewer() {
         onClick={handleReset}
         style={{
           position: 'absolute',
-          top: '15px',
-          right: '15px',
+          top: '10px',
+          right: '10px',
           zIndex: 1000,
-          padding: '10px 20px',
+          padding: '8px 16px',
           backgroundColor: '#dc3545',
           color: 'white',
           border: 'none',
           borderRadius: '6px',
           cursor: 'pointer',
-          fontSize: '14px',
+          fontSize: '12px',
           fontWeight: '500',
           boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
-          transition: 'background-color 0.2s',
-          pointerEvents: 'auto'
+          transition: 'background-color 0.2s'
         }}
         onMouseOver={(e) => e.target.style.backgroundColor = '#c82333'}
         onMouseOut={(e) => e.target.style.backgroundColor = '#dc3545'}
       >
-        📁 Загрузить другой файл
+        📁 Новый файл
       </button>
 
       {/* Панель информации о выбранном блоке */}
       {selectedNodeId && (
         <div style={{
           position: 'absolute',
-          bottom: '15px',
-          left: '15px',
+          bottom: '10px',
+          left: '10px',
           zIndex: 1000,
           backgroundColor: 'rgba(255,255,255,0.95)',
-          padding: '15px 20px',
+          padding: '12px 16px',
           borderRadius: '8px',
           border: '1px solid #ddd',
           boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
-          maxWidth: '400px',
-          fontSize: '13px',
+          maxWidth: '300px',
+          fontSize: '12px',
           pointerEvents: 'none'
         }}>
-          <div style={{ fontWeight: 'bold', marginBottom: '8px', color: '#007bff' }}>
-            📋 Информация о блоке
+          <div style={{ fontWeight: 'bold', marginBottom: '6px', color: '#007bff' }}>
+            📋 Блок
           </div>
-          <div style={{ marginBottom: '4px' }}>
-            <strong>ID:</strong> {selectedNodeId}
-          </div>
-          <div style={{ marginBottom: '4px' }}>
-            <strong>Название:</strong> {
-              nodes.find(n => n.id === selectedNodeId)?.data?.label || 'N/A'
-            }
-          </div>
-          <div style={{ marginBottom: '4px' }}>
-            <strong>Тип:</strong> {
-              nodes.find(n => n.id === selectedNodeId)?.data?.blockType || 'unknown'
-            }
-          </div>
-          <div style={{ marginBottom: '4px', color: '#666' }}>
-            <strong>Позиция (X, Y):</strong> {
-              Math.round(nodes.find(n => n.id === selectedNodeId)?.position?.x) || 0}, {
-              Math.round(nodes.find(n => n.id === selectedNodeId)?.position?.y) || 0}
-          </div>
-          <div style={{ marginBottom: '4px', color: '#28a745', fontSize: '11px' }}>
-            ✅ Привязка к сетке: {SNAP_GRID_SIZE}px
-          </div>
-          <div style={{ color: '#666', fontSize: '11px', marginTop: '8px' }}>
-            💡 Перетащите блок для изменения позиции • Клик для выбора
+          <div><strong>ID:</strong> {selectedNodeId}</div>
+          <div><strong>Название:</strong> {
+            nodes.find(n => n.id === selectedNodeId)?.data?.label || 'N/A'
+          }</div>
+          <div><strong>Позиция:</strong> {
+            Math.round(nodes.find(n => n.id === selectedNodeId)?.position?.x) || 0}, {
+            Math.round(nodes.find(n => n.id === selectedNodeId)?.position?.y) || 0}
           </div>
         </div>
       )}
 
-      {/* Панель информации о выбранной связи */}
-      {selectedEdgeId && (
-        <div style={{
-          position: 'absolute',
-          bottom: '15px',
-          left: '15px',
-          zIndex: 1000,
-          backgroundColor: 'rgba(255,255,255,0.95)',
-          padding: '15px 20px',
-          borderRadius: '8px',
-          border: '1px solid #ddd',
-          boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
-          maxWidth: '400px',
-          fontSize: '13px',
-          pointerEvents: 'none'
-        }}>
-          <div style={{ fontWeight: 'bold', marginBottom: '8px', color: '#28a745' }}>
-            🔗 Информация о связи
-          </div>
-          <div style={{ marginBottom: '4px' }}>
-            <strong>ID:</strong> {selectedEdgeId.replace('edge-', '')}
-          </div>
-          <div style={{ marginBottom: '4px' }}>
-            <strong>От:</strong> {
-              edges.find(e => e.id === selectedEdgeId)?.source || 'N/A'
-            }
-          </div>
-          <div style={{ marginBottom: '4px' }}>
-            <strong>К:</strong> {
-              edges.find(e => e.id === selectedEdgeId)?.target || 'N/A'
-            }
-          </div>
-          <div style={{ marginBottom: '4px' }}>
-            <strong>Значение:</strong> {
-              edges.find(e => e.id === selectedEdgeId)?.data?.edgeValue || 'N/A'
-            }
-          </div>
-          <div style={{ color: '#666', fontSize: '11px', marginTop: '8px' }}>
-            💡 Кликните на пустое место для снятия выделения
-          </div>
-        </div>
-      )}
-
-      {/* ReactFlow на весь экран */}
+      {/* ReactFlow */}
       <ReactFlow 
         nodes={nodes} 
         edges={edges} 
@@ -571,7 +527,7 @@ function WorkflowViewer() {
         autoPanOnNodeDrag={false}
         autoPanOnConnect={false}
         snapToGrid={true}
-        snapGrid={[SNAP_GRID_SIZE, SNAP_GRID_SIZE]} // 🔧 Точная привязка к сетке
+        snapGrid={[SNAP_GRID_SIZE, SNAP_GRID_SIZE]}
         zoomOnScroll={true}
         panOnScroll={true}
         panOnDrag={true}
@@ -592,11 +548,7 @@ function WorkflowViewer() {
         }}
       >
         <Controls showInteractive={false} />
-        <Background 
-          color="#ccc" 
-          gap={SNAP_GRID_SIZE} // 🔧 Визуальная сетка совпадает с привязкой
-          size={1}
-        />
+        <Background color="#ccc" gap={SNAP_GRID_SIZE} size={1} />
         <MiniMap 
           nodeStrokeColor={(n) => {
             if (n.id === selectedNodeId) return '#007bff';
@@ -609,12 +561,149 @@ function WorkflowViewer() {
           nodeBorderRadius={8}
           style={{ 
             backgroundColor: 'rgba(255, 255, 255, 0.9)',
-            border: '1px solid #ddd'
+            border: '1px solid #ddd',
+            width: '120px',
+            height: '80px'
           }}
         />
       </ReactFlow>
+    </div>
+  );
+}
 
-      {/* CSS стили для узлов и краёв */}
+// Главный компонент
+function WorkflowViewer() {
+  const [areas, setAreas] = useState([
+    { id: 1, title: 'Схема 1', active: true }
+  ]);
+  const [activeAreaId, setActiveAreaId] = useState(1);
+
+  const addArea = () => {
+    if (areas.length >= 2) return; // Максимум 2 области
+    const newId = Math.max(...areas.map(a => a.id)) + 1;
+    setAreas([...areas, { id: newId, title: `Схема ${newId}`, active: false }]);
+  };
+
+  const removeArea = (id) => {
+    if (areas.length <= 1) return; // Минимум 1 область
+    const newAreas = areas.filter(a => a.id !== id);
+    setAreas(newAreas);
+    if (activeAreaId === id) {
+      setActiveAreaId(newAreas[0].id);
+    }
+  };
+
+  const activateArea = (id) => {
+    setActiveAreaId(id);
+    setAreas(areas.map(a => ({
+      ...a,
+      active: a.id === id
+    })));
+  };
+
+  return (
+    <div style={{ 
+      position: 'fixed',
+      top: 0,
+      left: 0,
+      width: '100vw',
+      height: '100vh',
+      overflow: 'hidden',
+      backgroundColor: '#e8e8e8',
+      padding: '10px',
+      boxSizing: 'border-box'
+    }}>
+      {/* Верхняя панель управления */}
+      <div style={{
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: '10px',
+        padding: '10px 15px',
+        backgroundColor: 'white',
+        borderRadius: '8px',
+        boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
+      }}>
+        <div style={{ fontSize: '16px', fontWeight: '600', color: '#333' }}>
+          🗂️ Просмотр схем маршрутов
+          <span style={{ marginLeft: '15px', fontSize: '13px', color: '#666' }}>
+            ({areas.length} из 2 областей активно)
+          </span>
+        </div>
+        <div style={{ display: 'flex', gap: '10px' }}>
+          {areas.length < 2 && (
+            <button 
+              onClick={addArea}
+              style={{
+                padding: '10px 20px',
+                backgroundColor: '#28a745',
+                color: 'white',
+                border: 'none',
+                borderRadius: '6px',
+                cursor: 'pointer',
+                fontSize: '14px',
+                fontWeight: '500',
+                transition: 'background-color 0.2s'
+              }}
+              onMouseOver={(e) => e.target.style.backgroundColor = '#218838'}
+              onMouseOut={(e) => e.target.style.backgroundColor = '#28a745'}
+            >
+              + Добавить схему
+            </button>
+          )}
+          <button 
+            onClick={() => {
+              setAreas([{ id: 1, title: 'Схема 1', active: true }]);
+              setActiveAreaId(1);
+            }}
+            style={{
+              padding: '10px 20px',
+              backgroundColor: '#6c757d',
+              color: 'white',
+              border: 'none',
+              borderRadius: '6px',
+              cursor: 'pointer',
+              fontSize: '14px',
+              fontWeight: '500',
+              transition: 'background-color 0.2s'
+            }}
+            onMouseOver={(e) => e.target.style.backgroundColor = '#5a6268'}
+            onMouseOut={(e) => e.target.style.backgroundColor = '#6c757d'}
+          >
+            🔄 Сбросить всё
+          </button>
+        </div>
+      </div>
+
+      {/* Рабочие области */}
+      <div style={{
+        display: 'flex',
+        gap: '10px',
+        height: 'calc(100vh - 80px)',
+        width: '100%',
+        boxSizing: 'border-box'
+      }}>
+        {areas.map(area => (
+          <div 
+            key={area.id}
+            style={{
+              flex: 1,
+              minWidth: 0,
+              position: 'relative'
+            }}
+          >
+            <WorkflowArea
+              areaId={area.id}
+              title={area.title}
+              onClose={() => removeArea(area.id)}
+              isActive={area.active}
+              onActivate={activateArea}
+            />
+          </div>
+        ))}
+      </div>
+
+      {/* CSS стили */}
       <style>{`
         .workflow-node {
           transition: outline 0.15s ease-in-out, border-color 0.15s ease-in-out;
@@ -664,14 +753,12 @@ function WorkflowViewer() {
           stroke-width: 4px;
         }
         
-        /* Отключаем выделение текста при перетаскивании */
         .react-flow__nodes,
         .react-flow__edge-label {
           user-select: none;
           -webkit-user-select: none;
         }
         
-        /* 🔧 Усиливаем видимость сетки */
         .react-flow__background-pattern {
           opacity: 0.6;
         }
