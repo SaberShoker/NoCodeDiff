@@ -287,8 +287,23 @@ function WorkflowArea({
       }
 
       const fileData = await response.json();
+      
+      if (!fileData.content) {
+        throw new Error('Файл не содержит данных');
+      }
+      
       const content = atob(fileData.content);
-      const json = JSON.parse(content);
+      
+      if (!content || content.trim() === '') {
+        throw new Error('Пустое содержимое файла');
+      }
+      
+      let json;
+      try {
+        json = JSON.parse(content);
+      } catch (parseErr) {
+        throw new Error('Ошибка парсинга JSON: ' + parseErr.message);
+      }
 
       setCompareData(prev => ({
         ...prev,
