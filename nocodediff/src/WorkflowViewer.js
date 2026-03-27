@@ -26,6 +26,12 @@ function WorkflowArea({
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [isInitialLoad, setIsInitialLoad] = useState(true);
+  
+  // 🔧 Храним полную коллекцию блоков из JSON для получения детальной информации
+  const [blocksCollection, setBlocksCollection] = useState([]);
+  
+  // 🔧 Активная вкладка в панели информации
+  const [activeInfoTab, setActiveInfoTab] = useState('general');
 
   // Функция округления координат до сетки
   const snapToGrid = useCallback((value) => {
@@ -64,7 +70,9 @@ function WorkflowArea({
     setSelectedEdgeId(null);
     setNodes([]);
     setEdges([]);
+    setBlocksCollection([]);
     setIsInitialLoad(true);
+    setActiveInfoTab('general');
   };
 
   const parseWorkflowData = useCallback((json) => {
@@ -78,6 +86,10 @@ function WorkflowArea({
     const edgesCollection = routeScheme.Edges?.$values || [];
     const blocksLayout = layout.BlocksLayout?.$values || [];
 
+    // 🔧 Сохраняем полную коллекцию блоков для последующего использования
+    setBlocksCollection(blocksCollection);
+
+    // Парсим блоки из BlocksLayout с заголовками из Blocks
     const parsedNodes = blocksLayout.map(blockLayout => {
       const blockId = blockLayout.BlockId;
       const fullBlock = blocksCollection.find(b => b.Id === blockId);
@@ -91,7 +103,8 @@ function WorkflowArea({
         },
         data: { 
           label: fullBlock?.Title || blockId,
-          blockType: blockType
+          blockType: blockType,
+          fullBlock: fullBlock // 🔧 Сохраняем полную информацию о блоке
         },
         style: getBlockStyle(blockType, false),
         draggable: true,
@@ -99,6 +112,7 @@ function WorkflowArea({
       };
     });
 
+    // Парсим края из Edges
     const parsedEdges = edgesCollection.map(edge => ({
       id: `edge-${edge.Id}`,
       source: edge.Source,
@@ -129,6 +143,7 @@ function WorkflowArea({
     }
   }, [nodes.length, isInitialLoad]);
 
+  // Обработчик окончания перетаскивания
   const onNodeDragStop = useCallback((event, node) => {
     const snappedPosition = {
       x: snapToGrid(node.position.x),
@@ -146,10 +161,87 @@ function WorkflowArea({
     }));
   }, [setNodes, snapToGrid]);
 
+  // 🔧 Получаем детальную информацию о блоке из сохранённой коллекции
+  const getBlockDetails = useCallback((blockId) => {
+    const block = blocksCollection.find(b => b.Id === blockId);
+    if (!block) return null;
+    
+    return {
+      // Основная информация
+      id: block.Id,
+      title: block.Title || 'Без названия',
+      type: getBlockTypeName(block.$type),
+      typeId: block.BlockTypeId,
+      versionId: block.VersionId,
+      description: block.Description || 'Нет описания',
+      createdInTaskGuid: block.CreatedInTaskGuid,
+      processStagesDisplayMode: block.ProcessStagesDisplayMode,
+      timeoutErrorsCount: block.TimeoutErrorsCount,
+      
+      // 🔧 GroupsAttachmentsRights
+      groupsAttachmentsRights: block.GroupsAttachmentsRights?.$values || [],
+      
+      // 🔧 AttachmentGroupsSettings
+      attachmentGroupsSettings: block.AttachmentGroupsSettings?.$values || [],
+      
+      // 🔧 PropertyExpressions
+      propertyExpressions: block.PropertyExpressions?.$values || [],
+      
+      // 🔧 ParameterOperations
+      parameterOperations: block.ParameterOperations?.$values || [],
+      
+      // 🔧 Operations
+      operations: block.Operations?.$values || [],
+      
+      // Специфичные поля для разных типов блоков
+      executionResults: block.ExecutionResults?.$values || [],
+      customExecutionResults: block.CustomExecutionResults?.$values || [],
+      stopResults: block.StopResults?.$values || [],
+      deadline: block.AbsoluteDeadline || block.RelativeDeadline || 'Не установлен',
+      isParallel: block.IsParallel || false,
+      isCompetitive: block.IsCompetitive || false,
+      isStopped: block.IsStopped || false,
+      isWithAbsences: block.IsWithAbsences || false,
+      hasStopDeadline: block.HasStopDeadline || false,
+      performers: block.SidsOfPerformers?.$values?.length || 0,
+      resultVariableName: block.ResultVariableName,
+      result: block.Result,
+      noPerformersResult: block.NoPerformersResult,
+      instruction: block.Instruction,
+      subject: block.Subject,
+      threadSubject: block.ThreadSubject,
+      typeName: block.TypeName,
+      typeGuid: block.TypeGuid,
+      author: block.Author,
+      text: block.Text,
+      
+      // Для AssignmentBlock
+      relativeDeadlineDays: block.RelativeDeadlineDays,
+      relativeDeadlineHours: block.RelativeDeadlineHours,
+      absoluteDeadlineInternal: block.AbsoluteDeadlineInternal,
+      stopResults: block.StopResults,
+      
+      // Для ScriptBlock
+      customTypeProperties: block.CustomTypeProperties?.$values || [],
+      
+      // Для DecisionBlock
+      conditionExpressions: block.ConditionExpressions?.$values || [],
+      
+      // Для NoticeBlock
+      sidsOfPerformers: block.SidsOfPerformers?.$values || [],
+      
+      // Для WaitingBlock
+      relativeDeadline: block.RelativeDeadline,
+      deadlineInternal: block.DeadlineInternal
+    };
+  }, [blocksCollection]);
+
+  // Обработчик клика на узел
   const onNodeClick = useCallback((event, node) => {
     onActivate(areaId);
     setSelectedNodeId(node.id);
     setSelectedEdgeId(null);
+    setActiveInfoTab('general'); // Сбрасываем на первую вкладку
     
     setNodes(nds => nds.map(n => {
       if (n.id === node.id) {
@@ -175,6 +267,7 @@ function WorkflowArea({
     }));
   }, [setNodes, areaId, onActivate]);
 
+  // Обработчик клика на край
   const onEdgeClick = useCallback((event, edge) => {
     onActivate(areaId);
     setSelectedEdgeId(edge.id);
@@ -209,6 +302,7 @@ function WorkflowArea({
     }));
   }, [setEdges, areaId, onActivate]);
 
+  // Обработчик клика на пустое пространство
   const onPaneClick = useCallback(() => {
     onActivate(areaId);
     setSelectedNodeId(null);
@@ -234,6 +328,7 @@ function WorkflowArea({
     })));
   }, [setNodes, setEdges, areaId, onActivate]);
 
+  // Вспомогательные функции
   function getBlockType(block) {
     if (!block) return 'unknown';
     
@@ -247,6 +342,12 @@ function WorkflowArea({
     if (type.includes('NoticeBlock')) return 'notice';
     if (type.includes('TaskBlock')) return 'task';
     return 'default';
+  }
+
+  function getBlockTypeName(typeString) {
+    if (!typeString) return 'Неизвестный тип';
+    const parts = typeString.split('.');
+    return parts[parts.length - 1] || typeString;
   }
 
   function getBlockStyle(blockType, isSelected) {
@@ -277,6 +378,9 @@ function WorkflowArea({
       boxSizing: 'border-box'
     };
   }
+
+  // 🔧 Получаем текущий выбранный блок
+  const selectedBlockDetails = selectedNodeId ? getBlockDetails(selectedNodeId) : null;
 
   // Экран загрузки файла
   if (!jsonData) {
@@ -417,6 +521,16 @@ function WorkflowArea({
     );
   }
 
+  // 🔧 Вкладки для панели информации
+  const infoTabs = [
+    { id: 'general', label: '📋 Основное', count: null },
+    { id: 'rights', label: '🔐 Права', count: selectedBlockDetails?.groupsAttachmentsRights?.length || 0 },
+    { id: 'attachments', label: '📎 Вложения', count: selectedBlockDetails?.attachmentGroupsSettings?.length || 0 },
+    { id: 'properties', label: '⚙️ Свойства', count: selectedBlockDetails?.propertyExpressions?.length || 0 },
+    { id: 'parameters', label: '📊 Параметры', count: selectedBlockDetails?.parameterOperations?.length || 0 },
+    { id: 'operations', label: '🔧 Операции', count: selectedBlockDetails?.operations?.length || 0 }
+  ];
+
   // Отображение схемы
   return (
     <div style={{ 
@@ -479,32 +593,534 @@ function WorkflowArea({
         📁 Новый файл
       </button>
 
-      {/* Панель информации о выбранном блоке */}
-      {selectedNodeId && (
+      {/* 🔧 Панель детальной информации о блоке с вкладками */}
+      {selectedBlockDetails && (
         <div style={{
           position: 'absolute',
           bottom: '10px',
-          left: '10px',
+          right: '10px',
           zIndex: 1000,
-          backgroundColor: 'rgba(255,255,255,0.95)',
-          padding: '12px 16px',
+          backgroundColor: 'rgba(255,255,255,0.98)',
           borderRadius: '8px',
-          border: '1px solid #ddd',
-          boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
-          maxWidth: '300px',
+          border: '2px solid #007bff',
+          boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
+          maxWidth: '500px',
+          maxHeight: '500px',
+          overflow: 'hidden',
           fontSize: '12px',
-          pointerEvents: 'none'
+          pointerEvents: 'auto',
+          display: 'flex',
+          flexDirection: 'column'
         }}>
-          <div style={{ fontWeight: 'bold', marginBottom: '6px', color: '#007bff' }}>
-            📋 Блок
+          {/* Заголовок панели с кнопкой закрытия */}
+          <div style={{ 
+            display: 'flex', 
+            justifyContent: 'space-between', 
+            alignItems: 'center',
+            padding: '12px 15px',
+            borderBottom: '2px solid #007bff',
+            backgroundColor: '#f8f9fa'
+          }}>
+            <h4 style={{ margin: 0, color: '#007bff', fontSize: '14px' }}>
+              📋 {selectedBlockDetails.title || 'Блок'}
+            </h4>
+            <button 
+              onClick={() => setSelectedNodeId(null)}
+              style={{
+                background: 'none',
+                border: 'none',
+                cursor: 'pointer',
+                fontSize: '18px',
+                color: '#666',
+                padding: '0 4px',
+                lineHeight: 1
+              }}
+            >
+              ✕
+            </button>
           </div>
-          <div><strong>ID:</strong> {selectedNodeId}</div>
-          <div><strong>Название:</strong> {
-            nodes.find(n => n.id === selectedNodeId)?.data?.label || 'N/A'
-          }</div>
-          <div><strong>Позиция:</strong> {
-            Math.round(nodes.find(n => n.id === selectedNodeId)?.position?.x) || 0}, {
-            Math.round(nodes.find(n => n.id === selectedNodeId)?.position?.y) || 0}
+
+          {/* Вкладки */}
+          <div style={{
+            display: 'flex',
+            borderBottom: '1px solid #ddd',
+            backgroundColor: '#fff',
+            overflowX: 'auto'
+          }}>
+            {infoTabs.map(tab => (
+              <button
+                key={tab.id}
+                onClick={() => setActiveInfoTab(tab.id)}
+                style={{
+                  padding: '8px 12px',
+                  border: 'none',
+                  background: 'none',
+                  cursor: 'pointer',
+                  fontSize: '11px',
+                  fontWeight: activeInfoTab === tab.id ? '600' : '400',
+                  color: activeInfoTab === tab.id ? '#007bff' : '#666',
+                  borderBottom: activeInfoTab === tab.id ? '2px solid #007bff' : '2px solid transparent',
+                  whiteSpace: 'nowrap',
+                  position: 'relative',
+                  transition: 'all 0.2s'
+                }}
+                onMouseOver={(e) => {
+                  if (activeInfoTab !== tab.id) {
+                    e.target.style.backgroundColor = '#f0f0f0';
+                  }
+                }}
+                onMouseOut={(e) => {
+                  if (activeInfoTab !== tab.id) {
+                    e.target.style.backgroundColor = 'transparent';
+                  }
+                }}
+              >
+                {tab.label}
+                {tab.count !== null && tab.count > 0 && (
+                  <span style={{
+                    marginLeft: '4px',
+                    padding: '1px 4px',
+                    backgroundColor: activeInfoTab === tab.id ? '#007bff' : '#e0e0e0',
+                    color: activeInfoTab === tab.id ? '#fff' : '#666',
+                    borderRadius: '10px',
+                    fontSize: '10px'
+                  }}>
+                    {tab.count}
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
+
+          {/* Содержимое вкладок */}
+          <div style={{
+            padding: '15px',
+            overflowY: 'auto',
+            flex: 1,
+            maxHeight: '350px'
+          }}>
+            {/* 🔧 Вкладка: Основное */}
+            {activeInfoTab === 'general' && (
+              <div>
+                <div style={{ marginBottom: '12px' }}>
+                  <div style={{ marginBottom: '6px' }}>
+                    <strong style={{ color: '#333' }}>ID:</strong>{' '}
+                    <span style={{ color: '#007bff', fontFamily: 'monospace', fontSize: '11px' }}>
+                      {selectedBlockDetails.id}
+                    </span>
+                  </div>
+                  <div style={{ marginBottom: '6px' }}>
+                    <strong style={{ color: '#333' }}>Тип:</strong>{' '}
+                    <span style={{ 
+                      color: '#fff', 
+                      backgroundColor: '#007bff', 
+                      padding: '2px 6px', 
+                      borderRadius: '4px',
+                      fontSize: '10px'
+                    }}>
+                      {selectedBlockDetails.type}
+                    </span>
+                  </div>
+                  {selectedBlockDetails.description && selectedBlockDetails.description !== 'Нет описания' && (
+                    <div style={{ 
+                      marginBottom: '6px', 
+                      padding: '6px', 
+                      backgroundColor: '#f8f9fa', 
+                      borderRadius: '4px',
+                      borderLeft: '3px solid #007bff'
+                    }}>
+                      <strong style={{ color: '#333' }}>Описание:</strong>{' '}
+                      <span style={{ color: '#555' }}>{selectedBlockDetails.description}</span>
+                    </div>
+                  )}
+                  <div style={{ marginBottom: '6px', fontSize: '10px', color: '#666' }}>
+                    <strong>BlockTypeId:</strong>{' '}
+                    <span style={{ fontFamily: 'monospace' }}>{selectedBlockDetails.typeId?.substring(0, 36)}...</span>
+                  </div>
+                  <div style={{ marginBottom: '6px', fontSize: '10px', color: '#666' }}>
+                    <strong>VersionId:</strong>{' '}
+                    <span style={{ fontFamily: 'monospace' }}>{selectedBlockDetails.versionId?.substring(0, 36)}...</span>
+                  </div>
+                </div>
+
+                {/* Специфичная информация */}
+                <div style={{ 
+                  display: 'grid', 
+                  gridTemplateColumns: '1fr 1fr', 
+                  gap: '8px',
+                  marginBottom: '12px'
+                }}>
+                  {selectedBlockDetails.isParallel !== undefined && (
+                    <div style={{ padding: '6px', backgroundColor: '#f8f9fa', borderRadius: '4px' }}>
+                      <strong style={{ color: '#333', fontSize: '10px' }}>Параллельный:</strong>
+                      <div style={{ color: selectedBlockDetails.isParallel ? '#28a745' : '#666' }}>
+                        {selectedBlockDetails.isParallel ? '✓ Да' : '✗ Нет'}
+                      </div>
+                    </div>
+                  )}
+                  {selectedBlockDetails.isCompetitive !== undefined && (
+                    <div style={{ padding: '6px', backgroundColor: '#f8f9fa', borderRadius: '4px' }}>
+                      <strong style={{ color: '#333', fontSize: '10px' }}>Конкурентный:</strong>
+                      <div style={{ color: selectedBlockDetails.isCompetitive ? '#28a745' : '#666' }}>
+                        {selectedBlockDetails.isCompetitive ? '✓ Да' : '✗ Нет'}
+                      </div>
+                    </div>
+                  )}
+                  {selectedBlockDetails.performers !== undefined && (
+                    <div style={{ padding: '6px', backgroundColor: '#f8f9fa', borderRadius: '4px' }}>
+                      <strong style={{ color: '#333', fontSize: '10px' }}>Исполнители:</strong>
+                      <div style={{ color: '#007bff' }}>{selectedBlockDetails.performers}</div>
+                    </div>
+                  )}
+                  {selectedBlockDetails.operations?.length !== undefined && (
+                    <div style={{ padding: '6px', backgroundColor: '#f8f9fa', borderRadius: '4px' }}>
+                      <strong style={{ color: '#333', fontSize: '10px' }}>Операций:</strong>
+                      <div style={{ color: '#6f42c1' }}>{selectedBlockDetails.operations.length}</div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Результаты выполнения */}
+                {selectedBlockDetails.executionResults?.length > 0 && (
+                  <div style={{ 
+                    marginBottom: '12px', 
+                    padding: '8px', 
+                    backgroundColor: '#e8f4fd', 
+                    borderRadius: '4px'
+                  }}>
+                    <strong style={{ color: '#007bff', fontSize: '11px' }}>Результаты выполнения:</strong>
+                    <div style={{ marginTop: '4px' }}>
+                      {selectedBlockDetails.executionResults.map((result, idx) => (
+                        <span 
+                          key={idx}
+                          style={{ 
+                            display: 'inline-block',
+                            margin: '2px',
+                            padding: '2px 6px',
+                            backgroundColor: '#007bff',
+                            color: 'white',
+                            borderRadius: '3px',
+                            fontSize: '9px'
+                          }}
+                        >
+                          {result}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Кастомные свойства */}
+                {selectedBlockDetails.customTypeProperties?.length > 0 && (
+                  <div style={{ 
+                    padding: '8px', 
+                    backgroundColor: '#fff3cd', 
+                    borderRadius: '4px',
+                    border: '1px solid #ffc107'
+                  }}>
+                    <strong style={{ color: '#856404', fontSize: '11px' }}>⚙️ Свойства:</strong>
+                    <div style={{ marginTop: '4px' }}>
+                      {selectedBlockDetails.customTypeProperties.map((prop, idx) => (
+                        <div 
+                          key={idx}
+                          style={{ 
+                            fontSize: '10px', 
+                            marginBottom: '2px',
+                            padding: '2px 4px',
+                            backgroundColor: 'rgba(255,255,255,0.5)',
+                            borderRadius: '2px'
+                          }}
+                        >
+                          <strong>{prop.Name}:</strong> {String(prop.Value)}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* 🔧 Вкладка: Права доступа (GroupsAttachmentsRights) */}
+            {activeInfoTab === 'rights' && (
+              <div>
+                <h5 style={{ margin: '0 0 10px 0', color: '#007bff', fontSize: '12px' }}>
+                  🔐 Права доступа к вложениям
+                </h5>
+                {selectedBlockDetails.groupsAttachmentsRights?.length > 0 ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    {selectedBlockDetails.groupsAttachmentsRights.map((right, idx) => (
+                      <div 
+                        key={idx}
+                        style={{ 
+                          padding: '8px', 
+                          backgroundColor: '#f8f9fa', 
+                          borderRadius: '4px',
+                          border: '1px solid #e0e0e0'
+                        }}
+                      >
+                        <div style={{ fontSize: '10px', marginBottom: '4px' }}>
+                          <strong>Group ID:</strong>{' '}
+                          <span style={{ fontFamily: 'monospace', color: '#007bff' }}>
+                            {right.GroupId?.substring(0, 36)}...
+                          </span>
+                        </div>
+                        <div style={{ fontSize: '10px', marginBottom: '4px' }}>
+                          <strong>Права:</strong>{' '}
+                          <span style={{ color: '#28a745' }}>{right.AttachmentsRights}</span>
+                        </div>
+                        <div style={{ fontSize: '10px', marginBottom: '4px' }}>
+                          <strong>Тип прав:</strong>{' '}
+                          <span style={{ fontFamily: 'monospace' }}>{right.AttachmentsRightsTypeString?.substring(0, 36)}...</span>
+                        </div>
+                        <div style={{ fontSize: '10px' }}>
+                          <strong>Не выше инициатора:</strong>{' '}
+                          <span style={{ color: right.IsNotGreaterInitiatorRights ? '#dc3545' : '#28a745' }}>
+                            {right.IsNotGreaterInitiatorRights ? 'Да' : 'Нет'}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p style={{ color: '#999', fontSize: '11px', textAlign: 'center', padding: '20px' }}>
+                    Нет прав доступа
+                  </p>
+                )}
+              </div>
+            )}
+
+            {/* 🔧 Вкладка: Вложения (AttachmentGroupsSettings) */}
+            {activeInfoTab === 'attachments' && (
+              <div>
+                <h5 style={{ margin: '0 0 10px 0', color: '#007bff', fontSize: '12px' }}>
+                  📎 Настройки групп вложений
+                </h5>
+                {selectedBlockDetails.attachmentGroupsSettings?.length > 0 ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    {selectedBlockDetails.attachmentGroupsSettings.map((setting, idx) => (
+                      <div 
+                        key={idx}
+                        style={{ 
+                          padding: '8px', 
+                          backgroundColor: '#f8f9fa', 
+                          borderRadius: '4px',
+                          border: '1px solid #e0e0e0'
+                        }}
+                      >
+                        <div style={{ fontSize: '10px', marginBottom: '4px' }}>
+                          <strong>Group ID:</strong>{' '}
+                          <span style={{ fontFamily: 'monospace', color: '#007bff' }}>
+                            {setting.GroupId?.substring(0, 36)}...
+                          </span>
+                        </div>
+                        <div style={{ fontSize: '10px', marginBottom: '4px' }}>
+                          <strong>Скрыта:</strong>{' '}
+                          <span style={{ color: setting.IsHidden ? '#dc3545' : '#28a745' }}>
+                            {setting.IsHidden ? 'Да' : 'Нет'}
+                          </span>
+                        </div>
+                        <div style={{ fontSize: '10px', marginBottom: '4px' }}>
+                          <strong>Включена:</strong>{' '}
+                          <span style={{ color: setting.IsEnabled ? '#28a745' : '#999' }}>
+                            {setting.IsEnabled ? 'Да' : 'Нет'}
+                          </span>
+                        </div>
+                        <div style={{ fontSize: '10px', marginBottom: '4px' }}>
+                          <strong>Обязательна:</strong>{' '}
+                          <span style={{ color: setting.IsRequired ? '#28a745' : '#999' }}>
+                            {setting.IsRequired ? 'Да' : 'Нет'}
+                          </span>
+                        </div>
+                        <div style={{ fontSize: '10px' }}>
+                          <strong>Родительская группа:</strong>{' '}
+                          <span style={{ color: setting.IsParentTaskGroup ? '#28a745' : '#999' }}>
+                            {setting.IsParentTaskGroup ? 'Да' : 'Нет'}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p style={{ color: '#999', fontSize: '11px', textAlign: 'center', padding: '20px' }}>
+                    Нет настроек вложений
+                  </p>
+                )}
+              </div>
+            )}
+
+            {/* 🔧 Вкладка: Свойства (PropertyExpressions) */}
+            {activeInfoTab === 'properties' && (
+              <div>
+                <h5 style={{ margin: '0 0 10px 0', color: '#007bff', fontSize: '12px' }}>
+                  ⚙️ Выражения свойств
+                </h5>
+                {selectedBlockDetails.propertyExpressions?.length > 0 ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    {selectedBlockDetails.propertyExpressions.map((expr, idx) => (
+                      <div 
+                        key={idx}
+                        style={{ 
+                          padding: '8px', 
+                          backgroundColor: '#f8f9fa', 
+                          borderRadius: '4px',
+                          border: '1px solid #e0e0e0'
+                        }}
+                      >
+                        <div style={{ fontSize: '10px', marginBottom: '4px' }}>
+                          <strong>Свойство:</strong>{' '}
+                          <span style={{ color: '#007bff', fontWeight: '600' }}>{expr.PropertyName}</span>
+                        </div>
+                        <div style={{ fontSize: '10px', marginBottom: '4px' }}>
+                          <strong>Property ID:</strong>{' '}
+                          <span style={{ fontFamily: 'monospace', color: '#666' }}>
+                            {expr.PropertyId?.substring(0, 36)}...
+                          </span>
+                        </div>
+                        {expr.Expression?.Description && (
+                          <div style={{ fontSize: '10px', color: '#555' }}>
+                            <strong>Описание:</strong> {expr.Expression.Description}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p style={{ color: '#999', fontSize: '11px', textAlign: 'center', padding: '20px' }}>
+                    Нет выражений свойств
+                  </p>
+                )}
+              </div>
+            )}
+
+            {/* 🔧 Вкладка: Параметры (ParameterOperations) */}
+            {activeInfoTab === 'parameters' && (
+              <div>
+                <h5 style={{ margin: '0 0 10px 0', color: '#007bff', fontSize: '12px' }}>
+                  📊 Операции с параметрами
+                </h5>
+                {selectedBlockDetails.parameterOperations?.length > 0 ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    {selectedBlockDetails.parameterOperations.map((op, idx) => (
+                      <div 
+                        key={idx}
+                        style={{ 
+                          padding: '8px', 
+                          backgroundColor: '#f8f9fa', 
+                          borderRadius: '4px',
+                          border: '1px solid #e0e0e0'
+                        }}
+                      >
+                        <div style={{ fontSize: '10px', marginBottom: '4px' }}>
+                          <strong>Тип:</strong>{' '}
+                          <span style={{ 
+                            color: '#fff', 
+                            backgroundColor: '#6f42c1', 
+                            padding: '1px 4px', 
+                            borderRadius: '3px',
+                            fontSize: '9px'
+                          }}>
+                            {op.$type?.split('.').pop() || 'Operation'}
+                          </span>
+                        </div>
+                        {op.ExecutionResultCode && (
+                          <div style={{ fontSize: '10px', marginBottom: '4px' }}>
+                            <strong>Результат:</strong>{' '}
+                            <span style={{ color: '#007bff' }}>{op.ExecutionResultCode}</span>
+                          </div>
+                        )}
+                        <div style={{ fontSize: '10px', marginBottom: '4px' }}>
+                          <strong>Параметр:</strong>{' '}
+                          <span style={{ fontFamily: 'monospace', color: '#666' }}>
+                            {op.ParameterUuid?.substring(0, 36)}...
+                          </span>
+                        </div>
+                        <div style={{ fontSize: '10px' }}>
+                          <strong>Операция:</strong>{' '}
+                          <span style={{ color: '#28a745' }}>{op.OperationType}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p style={{ color: '#999', fontSize: '11px', textAlign: 'center', padding: '20px' }}>
+                    Нет операций с параметрами
+                  </p>
+                )}
+              </div>
+            )}
+
+            {/* 🔧 Вкладка: Операции (Operations) */}
+            {activeInfoTab === 'operations' && (
+              <div>
+                <h5 style={{ margin: '0 0 10px 0', color: '#007bff', fontSize: '12px' }}>
+                  🔧 Операции блока
+                </h5>
+                {selectedBlockDetails.operations?.length > 0 ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    {selectedBlockDetails.operations.map((op, idx) => (
+                      <div 
+                        key={idx}
+                        style={{ 
+                          padding: '8px', 
+                          backgroundColor: '#f8f9fa', 
+                          borderRadius: '4px',
+                          border: '1px solid #e0e0e0'
+                        }}
+                      >
+                        <div style={{ fontSize: '10px', marginBottom: '4px' }}>
+                          <strong>Тип:</strong>{' '}
+                          <span style={{ 
+                            color: '#fff', 
+                            backgroundColor: '#fd7e14', 
+                            padding: '1px 4px', 
+                            borderRadius: '3px',
+                            fontSize: '9px'
+                          }}>
+                            {op.$type?.split('.').pop() || 'Operation'}
+                          </span>
+                        </div>
+                        {op.ExecutionResult && (
+                          <div style={{ fontSize: '10px', marginBottom: '4px' }}>
+                            <strong>Результат:</strong>{' '}
+                            <span style={{ color: '#007bff' }}>{op.ExecutionResult}</span>
+                          </div>
+                        )}
+                        <div style={{ fontSize: '10px', marginBottom: '4px' }}>
+                          <strong>Операция:</strong>{' '}
+                          <span style={{ color: '#28a745' }}>{op.OperationType}</span>
+                        </div>
+                        {op.DestinationProperty?.Description && (
+                          <div style={{ fontSize: '10px', color: '#555' }}>
+                            <strong>Цель:</strong> {op.DestinationProperty.Description}
+                          </div>
+                        )}
+                        {op.Value?.Description && (
+                          <div style={{ fontSize: '10px', color: '#555' }}>
+                            <strong>Значение:</strong> {op.Value.Description}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p style={{ color: '#999', fontSize: '11px', textAlign: 'center', padding: '20px' }}>
+                    Нет операций
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Подсказка */}
+          <div style={{ 
+            padding: '8px 15px', 
+            borderTop: '1px dashed #ddd',
+            fontSize: '10px',
+            color: '#999',
+            textAlign: 'center',
+            backgroundColor: '#f8f9fa'
+          }}>
+            💡 Кликните на пустое место для закрытия
           </div>
         </div>
       )}
