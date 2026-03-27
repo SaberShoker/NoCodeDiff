@@ -288,8 +288,36 @@ function WorkflowArea({
 
       const fileData = await response.json();
       
+      // Проверяем наличие content в ответе
       if (!fileData.content) {
-        throw new Error('Файл не содержит данных');
+        // Если контента нет, пробуем загрузить напрямую по download_url из ответа
+        if (fileData.download_url) {
+          const contentResponse = await fetch(fileData.download_url);
+          if (!contentResponse.ok) {
+            throw new Error(`Не удалось получить содержимое файла: ${response.status}`);
+          }
+          const content = await contentResponse.text();
+          
+          if (!content || content.trim() === '') {
+            throw new Error('Пустое содержимое файла');
+          }
+          
+          let json;
+          try {
+            json = JSON.parse(content);
+          } catch (parseErr) {
+            throw new Error('Ошибка парсинга JSON: ' + parseErr.message);
+          }
+
+          setCompareData(prev => ({
+            ...prev,
+            [versionType]: { commit, json }
+          }));
+          setIsLoadingGit(false);
+          return;
+        } else {
+          throw new Error('Файл не найден в указанном коммите');
+        }
       }
       
       const content = atob(fileData.content);
