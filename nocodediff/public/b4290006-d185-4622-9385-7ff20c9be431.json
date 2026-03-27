@@ -90,7 +90,7 @@
               "BlockId": "2",
               "Bounds": {
                 "$type": "Sungero.Workflow.Layout.Point, Sungero.Workflow.Blocks",
-                "X": 20.0,
+                "X": 30.0,
                 "Y": 1670.0
               }
             },
@@ -99,7 +99,7 @@
               "BlockId": "SE_7",
               "Bounds": {
                 "$type": "Sungero.Workflow.Layout.Point, Sungero.Workflow.Blocks",
-                "X": 480.0,
+                "X": 500.0,
                 "Y": 1250.0
               }
             },
